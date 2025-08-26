@@ -2,6 +2,8 @@ import os
 import sys
 import requests
 import subprocess
+import tkinter as tk
+from tkinter import messagebox
 
 MAIN_SCRIPT = "trc to csv.py"
 UPDATER_SCRIPT = "updater.py"
@@ -55,6 +57,12 @@ def run_main():
     sys.exit(0)
 
 
+def ask_user_update():
+    root = tk.Tk()
+    root.withdraw()  # Hide the main window
+    return messagebox.askyesno("Update Available", "🚀 A new update is available.\nDo you want to update now?")
+
+
 def main():
     local_version = read_local_version()
     remote_version = fetch_remote_version()
@@ -67,8 +75,7 @@ def main():
     print(f"Remote version: {remote_version}")
 
     if remote_version != local_version:
-        choice = input("🚀 Update available. Do you want to update? (y/n): ").strip().lower()
-        if choice == "y":
+        if ask_user_update():
             print("⬇️ Updating files...")
             for fname, url in URLS.items():
                 download_file(url, fname)
