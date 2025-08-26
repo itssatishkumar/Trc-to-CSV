@@ -5,6 +5,48 @@ import cantools
 import pandas as pd
 from tkinter import Tk, filedialog
 from tqdm import tqdm
+import requests
+import subprocess
+import sys
+
+# ------------------ UPDATE CHECK ------------------
+LOCAL_VERSION_FILE = "version.txt"
+REMOTE_VERSION_URL = "https://raw.githubusercontent.com/itssatishkumar/Trc-to-CSV/refs/heads/main/version.txt"
+
+def get_local_version():
+    if not os.path.exists(LOCAL_VERSION_FILE):
+        return "0.0.0"
+    with open(LOCAL_VERSION_FILE, "r") as f:
+        return f.read().strip()
+
+def get_remote_version():
+    try:
+        r = requests.get(REMOTE_VERSION_URL, timeout=5)
+        if r.status_code == 200:
+            return r.text.strip()
+    except Exception:
+        return None
+    return None
+
+def version_newer(remote, local):
+    def parse(v): return tuple(map(int, (v.strip().split("."))))
+    try:
+        return parse(remote) > parse(local)
+    except Exception:
+        return False
+
+def check_for_update():
+    local = get_local_version()
+    remote = get_remote_version()
+    if remote and version_newer(remote, local):
+        print(f"⚡ Update available: {local} → {remote}")
+        print("➡️  Running updater...")
+        subprocess.run([sys.executable, "updater.py"])
+        sys.exit(0)
+    else:
+        print("✅ You are running the latest version.")
+
+# --------------------------------------------------
 
 def extract_trc_info(filepath):
     with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
@@ -54,12 +96,9 @@ def merge_in_forced_order(trc_files):
         return trc_files[0]
 
     file_infos = [extract_trc_info(f) for f in trc_files]
-
-    # Allow mixed versions
     versions = set(info["version"] for info in file_infos)
     print(f"ℹ️ Found TRC versions in input: {', '.join(versions)}")
 
-    # Sort by start time
     file_infos.sort(key=lambda x: x["start_timestamp"])
     print("\n🕒 File Start Times (merge will follow this order):")
     for info in file_infos:
@@ -231,4 +270,5 @@ def main():
     write_large_csv(df, base_path)
 
 if __name__ == "__main__":
+    check_for_update()
     main()
