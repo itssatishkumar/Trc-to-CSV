@@ -11,9 +11,8 @@ def ensure_package(pkg_name, import_name=None):
         print(f"⚡ Installing {pkg_name}...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", pkg_name])
 
-# Ensure required packages
-for pkg, imp in [("requests", None), ("tk")]:
-    ensure_package(pkg, imp)
+# Only install packages that are actually on PyPI
+ensure_package("requests")
 
 # Now import safely
 import requests
@@ -30,7 +29,6 @@ URLS = {
     "version.txt": "https://raw.githubusercontent.com/itssatishkumar/Trc-to-CSV/refs/heads/main/version.txt"
 }
 
-
 def read_local_version():
     if not os.path.exists(LOCAL_VERSION_FILE):
         return "0.0.0"
@@ -40,7 +38,6 @@ def read_local_version():
     except Exception:
         return "0.0.0"
 
-
 def fetch_remote_version():
     try:
         r = requests.get(URLS["version.txt"], timeout=10)
@@ -49,7 +46,6 @@ def fetch_remote_version():
     except Exception as e:
         print(f"❌ Could not fetch remote version: {e}")
     return None
-
 
 def download_file(url, local):
     try:
@@ -65,18 +61,15 @@ def download_file(url, local):
         print(f"❌ Error fetching {url}: {e}")
     return False
 
-
 def run_main():
     print("🔄 Launching main script...")
     subprocess.Popen([sys.executable, MAIN_SCRIPT])
     sys.exit(0)
 
-
 def ask_user_update():
     root = tk.Tk()
     root.withdraw()  # Hide the main window
     return messagebox.askyesno("Update Available", "🚀 A new update is available.\nDo you want to update now?")
-
 
 def main():
     local_version = read_local_version()
@@ -103,7 +96,6 @@ def main():
             print("⏩ Skipping update.")
 
     run_main()
-
 
 if __name__ == "__main__":
     main()
