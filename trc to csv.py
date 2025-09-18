@@ -25,10 +25,14 @@ from tqdm import tqdm
 import requests
 from tkinter import Tk, filedialog
 
-# ------------------ UPDATE CHECK ------------------
-LOCAL_VERSION_FILE = "version.txt"
+# ------------------ FIX: Ensure paths are relative to script ------------------
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(BASE_DIR)
+LOCAL_VERSION_FILE = os.path.join(BASE_DIR, "version.txt")
 REMOTE_VERSION_URL = "https://raw.githubusercontent.com/itssatishkumar/Trc-to-CSV/refs/heads/main/version.txt"
+# ------------------------------------------------------------------------------
 
+# ------------------ UPDATE CHECK ------------------
 def get_local_version():
     if not os.path.exists(LOCAL_VERSION_FILE):
         return "0.0.0"
@@ -57,7 +61,7 @@ def check_for_update():
     if remote and version_newer(remote, local):
         print(f"⚡ Update available: {local} → {remote}")
         print("➡️  Running updater...")
-        subprocess.run([sys.executable, "updater.py"])
+        subprocess.run([sys.executable, os.path.join(BASE_DIR, "updater.py")])
         sys.exit(0)
     else:
         print("✅ You are running the latest version.")
