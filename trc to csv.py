@@ -14,8 +14,8 @@ def ensure_package(pkg_name, import_name=None):
         print(f"⚡ Installing {pkg_name}...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", pkg_name])
 
-# Required packages
-for pkg, imp in [("pandas", None), ("cantools", None), ("tqdm", None), ("requests", None), ("tkinter", None)]:
+# Required packages (tkinter comes with Python, no pip needed)
+for pkg, imp in [("pandas", None), ("cantools", None), ("tqdm", None), ("requests", None)]:
     ensure_package(pkg, imp)
 
 # ------------------ IMPORTS ------------------
