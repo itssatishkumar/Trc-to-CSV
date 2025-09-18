@@ -1,13 +1,29 @@
 import os
 import re
 import math
-import cantools
-import pandas as pd
-from tkinter import Tk, filedialog
-from tqdm import tqdm
-import requests
 import subprocess
 import sys
+
+# ------------------ AUTO PACKAGE INSTALL ------------------
+def ensure_package(pkg_name, import_name=None):
+    """Check if package is installed; if not, install it."""
+    import_name = import_name or pkg_name
+    try:
+        __import__(import_name)
+    except ImportError:
+        print(f"⚡ Installing {pkg_name}...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", pkg_name])
+
+# Required packages
+for pkg, imp in [("pandas", None), ("cantools", None), ("tqdm", None), ("requests", None), ("tkinter", None)]:
+    ensure_package(pkg, imp)
+
+# ------------------ IMPORTS ------------------
+import pandas as pd
+import cantools
+from tqdm import tqdm
+import requests
+from tkinter import Tk, filedialog
 
 # ------------------ UPDATE CHECK ------------------
 LOCAL_VERSION_FILE = "version.txt"
@@ -46,8 +62,7 @@ def check_for_update():
     else:
         print("✅ You are running the latest version.")
 
-# --------------------------------------------------
-
+# ------------------ TRC HANDLING ------------------
 def extract_trc_info(filepath):
     with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
         lines = f.readlines()
