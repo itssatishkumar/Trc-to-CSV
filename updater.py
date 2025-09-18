@@ -1,17 +1,32 @@
 import os
 import sys
-import requests
 import subprocess
+
+# ------------------ Ensure required packages ------------------
+def ensure_package(pkg_name, import_name=None):
+    import_name = import_name or pkg_name
+    try:
+        __import__(import_name)
+    except ImportError:
+        print(f"⚡ Installing {pkg_name}...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", pkg_name])
+
+# Ensure required packages
+for pkg, imp in [("requests", None), ("tk")]:
+    ensure_package(pkg, imp)
+
+# Now import safely
+import requests
 import tkinter as tk
 from tkinter import messagebox
 
+# ------------------ Updater logic ------------------
 MAIN_SCRIPT = "trc to csv.py"
-UPDATER_SCRIPT = "updater.py"
 LOCAL_VERSION_FILE = "version.txt"
 
 URLS = {
     MAIN_SCRIPT: "https://raw.githubusercontent.com/itssatishkumar/Trc-to-CSV/refs/heads/main/trc%20to%20csv.py",
-    UPDATER_SCRIPT: "https://raw.githubusercontent.com/itssatishkumar/Trc-to-CSV/refs/heads/main/updater.py",
+    "updater.py": "https://raw.githubusercontent.com/itssatishkumar/Trc-to-CSV/refs/heads/main/updater.py",
     "version.txt": "https://raw.githubusercontent.com/itssatishkumar/Trc-to-CSV/refs/heads/main/version.txt"
 }
 
