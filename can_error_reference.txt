@@ -1,59 +1,50 @@
+# CAN Error Reference File
+# Format: ERROR_TYPE|DATA_BYTE_0|DATA_BYTE_1|Friendly Message|Possible Cause|Possible Solution
 
-Error Warnings 
-Error Warnings consist of a bit combination of error flags. The 32-bit Error Warning code is 
-contained in the first 4 data bytes in Motorola format (most significant byte first). 
-The following table lists the Error Warning flags that can be recorded in a Trace file: 
-Code 
-Short Name 
-Description 
-0x00000002 OVERRUN 
-The CAN controller receives so many messages that not 
-all of the triggered hardware interrupts can be processed 
-CAN controller was read too late. 
-0x00000004 BUSLIGHT 
-Bus error: an error counter reached the ‘light’ limit (more 
-than 0 error points). 
-0x00000008 BUSHEAVY Bus error: an error counter reached the ‘heavy’ limit (at 
-least 96 error points). 
-0x00000010 BUSOFF 
-Bus error: the CAN controller is in Bus-off state because a 
-serious and continuous error exists on the bus (255 error 
-points have been exceeded). 
-Error Frames 
-All relevant information of Error Frames is contained in the CAN ID and 4 data bytes. 
-ID: Type of Error Frame 
-1 = Bit Error 
-2 = Form Error 
-4 = Stuff Error 
-8 = Other Error 
-Data Byte 0: Direction 
-0 = Error occurred while sending  
-1 = Error occurred while receiving. 
-Data Byte 1: Current Position in Bit Stream 
-2 = ID.28 to ID.21 
-3 = Start of frame 
-4 = Bit SRTR 
-5 = BIT IDE 
-6 = ID.20 to ID.18 
-7 = ID.17 to ID.13 
-8 = CRC Sequence 
-9 = Reserved Bit 0  
-10 = Data field 
-11 = Data Length Code 
-12 = Bit RTR 
-13 = Reserved Bit 1 
-14 = ID.4 to ID.0 
-15 = ID.12 to ID.5 
-17 = Active Error Flag 
-18 = Intermission 
-19 = Tolerate dominant Bits 
-23 = Error Delimiter 
-24 = CRC Delimiter 
-25 = Acknowledge Slot 
-26 = End of Frame 
-27 = Acknowledge Limiter 
-28 = Overload Flag. 
-Data Byte 2: RX Error Counter 
-Current Value of the Receive Error counter. 
-Data Byte 3: TX Error Counter 
-Current Value of the Transmit Error counter. 
+# Error Types (ID)
+1|0|*|Bit Error - Sending|Signal corrupted during transmission|Check wiring, nodes, bus termination, transceivers
+1|1|*|Bit Error - Receiving|Signal corrupted during reception|Check wiring, nodes, bus termination, transceivers
+2|0|*|Form Error - Sending|Frame format violation during transmission|Check frame format, CAN controller config, bus integrity
+2|1|*|Form Error - Receiving|Frame format violation during reception|Check frame format, bus noise, wiring, nodes
+4|0|2|Stuff Error - Sending at ID.28 to ID.21|Bus noise, incorrect voltage, faulty transceiver|Inspect CAN wiring, nodes, and bus termination
+4|0|3|Stuff Error - Sending at Start of frame|Bus noise, timing error|Inspect CAN wiring, termination, check for reflections
+4|0|4|Stuff Error - Sending at Bit SRTR|Bus noise or misaligned frames|Check CAN nodes and voltage levels
+4|0|5|Stuff Error - Sending at BIT IDE|Incorrect arbitration or frame misalignment|Verify DBC file, node settings, bus load
+4|0|6|Stuff Error - Sending at ID.20 to ID.18|Transmission issue|Check wiring and transceiver
+4|0|7|Stuff Error - Sending at ID.17 to ID.13|Transmission issue|Check wiring and transceiver
+4|0|8|Stuff Error - Sending at CRC Sequence|Bus noise, voltage levels, reflections|Check CAN bus wiring, termination, node voltages
+4|0|10|Stuff Error - Sending at Data field|Transmission problem|Inspect wiring, transceiver, check CAN controller
+4|0|11|Stuff Error - Sending at Data Length Code|Frame length mismatch|Verify DBC, check bus load
+4|0|12|Stuff Error - Sending at Bit RTR|Remote frame misalignment|Check controller configuration and nodes
+4|0|14|Stuff Error - Sending at ID.4 to ID.0|Arbitration issue|Check node config and bus integrity
+4|0|15|Stuff Error - Sending at ID.12 to ID.5|Arbitration issue|Check node config and bus integrity
+4|0|17|Stuff Error - Sending at Active Error Flag|High error rate|Check termination, wiring, transceivers
+4|0|18|Stuff Error - Sending at Intermission|Bus disturbance|Inspect wiring and termination
+4|0|19|Stuff Error - Sending at Tolerate dominant Bits|Bus noise|Check wiring, nodes, termination
+4|0|23|Stuff Error - Sending at Error Delimiter|Transmission error|Check nodes and wiring
+4|0|24|Stuff Error - Sending at CRC Delimiter|CRC error|Check bus termination and wiring
+4|0|25|Stuff Error - Sending at Acknowledge Slot|ACK mismatch|Check all nodes responding properly
+4|0|26|Stuff Error - Sending at End of Frame|Transmission error|Check wiring, nodes, termination
+4|0|27|Stuff Error - Sending at Acknowledge Limiter|High error rate|Inspect nodes and termination
+4|0|28|Stuff Error - Sending at Overload Flag|Bus overload|Reduce bus traffic, check wiring
+4|1|2|Stuff Error - Receiving at ID.28 to ID.21|Bus noise, incorrect voltage, reflections|Check CAN wiring, nodes, and bus termination
+4|1|3|Stuff Error - Receiving at Start of frame|Bus noise, timing error|Inspect wiring, termination, nodes
+4|1|4|Stuff Error - Receiving at Bit SRTR|Bus noise or misaligned frames|Check CAN nodes and voltage levels
+4|1|5|Stuff Error - Receiving at BIT IDE|Incorrect arbitration or frame misalignment|Verify DBC file, node settings, bus load
+4|1|6|Stuff Error - Receiving at ID.20 to ID.18|Reception issue|Check wiring and transceiver
+4|1|7|Stuff Error - Receiving at ID.17 to ID.13|Reception issue|Check wiring and transceiver
+4|1|8|Stuff Error - Receiving at CRC Sequence|Bus noise, voltage levels, reflections|Check CAN bus wiring, termination, node voltages
+4|1|10|Stuff Error - Receiving at Data field|Reception problem|Inspect wiring, transceiver, check CAN controller
+4|1|11|Stuff Error - Receiving at Data Length Code|Frame length mismatch|Verify DBC, check bus load
+4|1|12|Stuff Error - Receiving at Bit RTR|Remote frame misalignment|Check controller configuration and nodes
+4|1|14|Stuff Error - Receiving at ID.4 to ID.0|Arbitration issue|Check node config and bus integrity
+4|1|15|Stuff Error - Receiving at ID.12 to ID.5|Arbitration issue|Check node config and bus integrity
+4|1|17|Stuff Error - Receiving at Active Error Flag|High error rate|Check termination, wiring, transceivers
+4|1|18|Stuff Error - Receiving at Intermission|Bus disturbance|Inspect wiring and termination
+4|1|19|Stuff Error - Receiving at Tolerate dominant Bits|Bus noise|Check wiring, nodes, termination
+4|1|23|Stuff Error - Receiving at Error Delimiter|Reception error|Check nodes and wiring
+4|1|24|Stuff Error - Receiving at CRC Delimiter|CRC error|Check bus termination and wiring
+4|1|25|Stuff Error - Receiving at Acknowledge Slot|ACK mismatch|Check all nodes responding properly
+4|1|26|Stuff Error - Receiving at End of Frame|Reception error|Check wiring, nodes, termination
+4|1|27|Stuff Error - Receiving at Acknowledge Limiter|High error rate|Inspect nodes and termination
+4|1|28|Stuff Error - Receiving at Overload Flag|Bus overload|Reduce bus traffic, check wiring
