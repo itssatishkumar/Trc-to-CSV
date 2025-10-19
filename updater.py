@@ -1,6 +1,9 @@
 import os
 import sys
 import subprocess
+import requests
+import tkinter as tk
+from tkinter import messagebox
 
 # ------------------ Ensure required packages ------------------
 def ensure_package(pkg_name, import_name=None):
@@ -13,13 +16,10 @@ def ensure_package(pkg_name, import_name=None):
 
 ensure_package("requests")
 
-import requests
-import tkinter as tk
-from tkinter import messagebox
-
 # ------------------ Updater logic ------------------
-MAIN_SCRIPT = "trc to csv.py"
-LOCAL_VERSION_FILE = "version.txt"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MAIN_SCRIPT = os.path.join(BASE_DIR, "trc to csv.py")
+LOCAL_VERSION_FILE = os.path.join(BASE_DIR, "version.txt")
 
 URLS = {
     MAIN_SCRIPT: "https://raw.githubusercontent.com/itssatishkumar/Trc-to-CSV/main/trc%20to%20csv.py",
@@ -28,7 +28,7 @@ URLS = {
     "can_error_reference.txt": "https://raw.githubusercontent.com/itssatishkumar/Trc-to-CSV/main/can_error_reference.txt"
 }
 
-# ------------------ Helpers ------------------
+# ------------------ Version Handling ------------------
 def read_local_version():
     if not os.path.exists(LOCAL_VERSION_FILE):
         return "0.0.0"
@@ -61,17 +61,20 @@ def download_file(url, local):
         print(f"❌ Error fetching {url}: {e}")
     return False
 
+def ask_user_update(local_version, remote_version):
+    root = tk.Tk()
+    root.withdraw()
+    return messagebox.askyesno(
+        "Update Available",
+        f"🚀 A new update is available.\nLocal version: {local_version}\nRemote version: {remote_version}\n\nDo you want to update now?"
+    )
+
 def run_main():
     print("🔄 Launching main script...")
     subprocess.Popen([sys.executable, MAIN_SCRIPT])
     sys.exit(0)
 
-def ask_user_update():
-    root = tk.Tk()
-    root.withdraw()  # Hide the main window
-    return messagebox.askyesno("Update Available", "🚀 A new update is available.\nDo you want to update now?")
-
-# ------------------ Main Updater Flow ------------------
+# ------------------ Main Updater Logic ------------------
 def main():
     local_version = read_local_version()
     remote_version = fetch_remote_version() or local_version
@@ -79,32 +82,28 @@ def main():
     print(f"Local version: {local_version}")
     print(f"Remote version: {remote_version}")
 
-    # 1️⃣ First, download any missing files (always)
-    missing_files = [fname for fname in URLS if not os.path.exists(fname)]
+    # 1️⃣ Download all missing files first
+    missing_files = [fname for fname in URLS if not os.path.exists(os.path.join(BASE_DIR, fname))]
     if missing_files:
-        print("⬇️ Downloading missing files...")
+        print("⬇️ Downloading missing file(s)...")
         for fname in missing_files:
-            download_file(URLS[fname], fname)
-    else:
-        print("✅ No missing files.")
+            download_file(URLS[fname], os.path.join(BASE_DIR, fname))
+        print("✅ Missing files downloaded.")
 
-    # 2️⃣ Then check version
+    # 2️⃣ If version changed → ask user to update all
     if remote_version != local_version:
-        if ask_user_update():
-            print("⬇️ Updating all files to latest version...")
+        if ask_user_update(local_version, remote_version):
+            print("⬇️ Updating all files to new version...")
             for fname, url in URLS.items():
-                download_file(url, fname)
+                download_file(url, os.path.join(BASE_DIR, fname))
 
+            # Update version file
             with open(LOCAL_VERSION_FILE, "w") as f:
                 f.write(remote_version)
-
             print("✅ Update complete.")
         else:
             print("⏩ Skipping update.")
-    else:
-        print("✅ You are running the latest version.")
 
-    # 3️⃣ Launch main script
     run_main()
 
 if __name__ == "__main__":
