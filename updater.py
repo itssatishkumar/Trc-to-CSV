@@ -1,23 +1,10 @@
 import os
 import sys
 import subprocess
-
-# ------------------ Ensure required packages ------------------
-def ensure_package(pkg_name, import_name=None):
-    import_name = import_name or pkg_name
-    try:
-        __import__(import_name)
-    except ImportError:
-        print(f"⚡ Installing {pkg_name}...")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", pkg_name])
-
-ensure_package("requests")
-
 import requests
 import tkinter as tk
 from tkinter import messagebox
 
-# ------------------ Updater logic ------------------
 MAIN_SCRIPT = "trc to csv.py"
 LOCAL_VERSION_FILE = "version.txt"
 
@@ -34,7 +21,7 @@ def read_local_version():
     try:
         with open(LOCAL_VERSION_FILE, "r") as f:
             return f.read().strip()
-    except Exception:
+    except:
         return "0.0.0"
 
 def fetch_remote_version():
@@ -42,8 +29,8 @@ def fetch_remote_version():
         r = requests.get(URLS["version.txt"], timeout=10)
         if r.status_code == 200:
             return r.text.strip()
-    except Exception as e:
-        print(f"❌ Could not fetch remote version: {e}")
+    except:
+        return None
     return None
 
 def download_file(url, local):
@@ -61,7 +48,6 @@ def download_file(url, local):
     return False
 
 def run_main():
-    print("🔄 Launching main script...")
     subprocess.Popen([sys.executable, MAIN_SCRIPT])
     sys.exit(0)
 
@@ -77,33 +63,25 @@ def main():
     print(f"Local version: {local_version}")
     print(f"Remote version: {remote_version}")
 
-    files_to_download = []
-
-    # 1️⃣ If version changed → ask user and download all files
+    # 1️⃣ Version update
     if remote_version != local_version:
         if ask_user_update():
-            files_to_download = list(URLS.keys())
+            print("⬇️ Updating all files due to version change...")
+            for fname, url in URLS.items():
+                download_file(url, fname)
             with open(LOCAL_VERSION_FILE, "w") as f:
                 f.write(remote_version)
             print(f"✅ Version updated to {remote_version}")
-        else:
-            print("⏩ Skipping version update. Only missing files will be checked.")
 
-    # 2️⃣ Check for missing files → always download
-    for fname in URLS.keys():
-        if not os.path.exists(fname) and fname not in files_to_download:
-            files_to_download.append(fname)
-
-    # 3️⃣ Download files (version update + missing)
-    if files_to_download:
-        print("⬇️ Downloading required files...")
-        for fname in files_to_download:
+    # 2️⃣ Missing files check → always download if missing
+    missing_files = [fname for fname in URLS if not os.path.exists(fname)]
+    if missing_files:
+        print("⬇️ Downloading missing files...")
+        for fname in missing_files:
             download_file(URLS[fname], fname)
-        print("✅ All required files are now present.")
-    else:
-        print("✅ All files are already present and up-to-date.")
+        print("✅ All missing files downloaded.")
 
-    # 4️⃣ Run main script
+    # 3️⃣ Run main
     run_main()
 
 if __name__ == "__main__":
