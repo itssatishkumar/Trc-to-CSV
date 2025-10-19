@@ -1,6 +1,9 @@
 import os
 import sys
 import subprocess
+import requests
+import tkinter as tk
+from tkinter import messagebox
 
 # ------------------ Ensure required packages ------------------
 def ensure_package(pkg_name, import_name=None):
@@ -11,13 +14,7 @@ def ensure_package(pkg_name, import_name=None):
         print(f"⚡ Installing {pkg_name}...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", pkg_name])
 
-# Only install packages that are actually on PyPI
 ensure_package("requests")
-
-# Now import safely
-import requests
-import tkinter as tk
-from tkinter import messagebox
 
 # ------------------ Updater logic ------------------
 MAIN_SCRIPT = "trc to csv.py"
@@ -69,32 +66,40 @@ def run_main():
 
 def ask_user_update():
     root = tk.Tk()
-    root.withdraw()  # Hide the main window
+    root.withdraw()
     return messagebox.askyesno("Update Available", "🚀 A new update is available.\nDo you want to update now?")
 
 def main():
     local_version = read_local_version()
-    remote_version = fetch_remote_version()
-
-    if not remote_version:
-        print("⚠️ Could not check remote version. Running current script.")
-        run_main()
+    remote_version = fetch_remote_version() or local_version
 
     print(f"Local version: {local_version}")
     print(f"Remote version: {remote_version}")
 
+    files_to_download = []
+
+    # 1️⃣ If version changed → download all files
     if remote_version != local_version:
         if ask_user_update():
-            print("⬇️ Updating files...")
-            for fname, url in URLS.items():
-                download_file(url, fname)
-
+            files_to_download = list(URLS.keys())
             with open(LOCAL_VERSION_FILE, "w") as f:
                 f.write(remote_version)
-
-            print("✅ Update complete.")
+            print(f"✅ Version updated to {remote_version}")
         else:
-            print("⏩ Skipping update.")
+            print("⏩ Skipping update. Only missing files will be checked.")
+
+    # 2️⃣ Check for missing files → always download
+    for fname in URLS.keys():
+        if not os.path.exists(fname) and fname not in files_to_download:
+            files_to_download.append(fname)
+
+    if files_to_download:
+        print("⬇️ Downloading required files...")
+        for fname in files_to_download:
+            download_file(URLS[fname], fname)
+        print("✅ All required files are now present.")
+    else:
+        print("✅ All files are already present and up-to-date.")
 
     run_main()
 
