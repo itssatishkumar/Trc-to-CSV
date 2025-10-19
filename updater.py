@@ -1,9 +1,6 @@
 import os
 import sys
 import subprocess
-import requests
-import tkinter as tk
-from tkinter import messagebox
 
 # ------------------ Ensure required packages ------------------
 def ensure_package(pkg_name, import_name=None):
@@ -15,6 +12,10 @@ def ensure_package(pkg_name, import_name=None):
         subprocess.check_call([sys.executable, "-m", "pip", "install", pkg_name])
 
 ensure_package("requests")
+
+import requests
+import tkinter as tk
+from tkinter import messagebox
 
 # ------------------ Updater logic ------------------
 MAIN_SCRIPT = "trc to csv.py"
@@ -78,7 +79,7 @@ def main():
 
     files_to_download = []
 
-    # 1️⃣ If version changed → download all files
+    # 1️⃣ If version changed → ask user and download all files
     if remote_version != local_version:
         if ask_user_update():
             files_to_download = list(URLS.keys())
@@ -86,13 +87,14 @@ def main():
                 f.write(remote_version)
             print(f"✅ Version updated to {remote_version}")
         else:
-            print("⏩ Skipping update. Only missing files will be checked.")
+            print("⏩ Skipping version update. Only missing files will be checked.")
 
     # 2️⃣ Check for missing files → always download
     for fname in URLS.keys():
         if not os.path.exists(fname) and fname not in files_to_download:
             files_to_download.append(fname)
 
+    # 3️⃣ Download files (version update + missing)
     if files_to_download:
         print("⬇️ Downloading required files...")
         for fname in files_to_download:
@@ -101,6 +103,7 @@ def main():
     else:
         print("✅ All files are already present and up-to-date.")
 
+    # 4️⃣ Run main script
     run_main()
 
 if __name__ == "__main__":
