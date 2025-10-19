@@ -3,10 +3,10 @@ import re
 import math
 import subprocess
 import sys
+from collections import defaultdict
 
 # ------------------ AUTO PACKAGE INSTALL ------------------
 def ensure_package(pkg_name, import_name=None):
-    """Check if package is installed; if not, install it."""
     import_name = import_name or pkg_name
     try:
         __import__(import_name)
@@ -14,7 +14,6 @@ def ensure_package(pkg_name, import_name=None):
         print(f"⚡ Installing {pkg_name}...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", pkg_name])
 
-# Required packages
 for pkg, imp in [("pandas", None), ("cantools", None), ("tqdm", None), ("requests", None)]:
     ensure_package(pkg, imp)
 
@@ -23,7 +22,8 @@ import pandas as pd
 import cantools
 from tqdm import tqdm
 import requests
-from tkinter import Tk, filedialog
+import tkinter as tk
+from tkinter import filedialog, messagebox, scrolledtext
 
 # ------------------ PATHS & URLS ------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -54,7 +54,6 @@ def download_file(url, local):
         print(f"❌ Error downloading {url}: {e}")
     return False
 
-# ------------------ VERSION CHECK ------------------
 def get_local_version():
     if not os.path.exists(LOCAL_VERSION_FILE):
         return "0.0.0"
@@ -87,6 +86,24 @@ def check_for_update():
         sys.exit(0)
     else:
         print("✅ You are running the latest version.")
+
+# ------------------ CAN ERROR REFERENCE ------------------
+def load_can_errors(ref_file):
+    errors = {}
+    if not os.path.exists(ref_file):
+        print(f"❌ CAN error reference file not found: {ref_file}")
+        return errors
+    with open(ref_file, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "|" in line:
+                code, msg = line.split("|", 1)
+                errors[code.strip()] = msg.strip()
+    return errors
+
+CAN_ERRORS = load_can_errors(os.path.join(BASE_DIR, "can_error_reference.txt"))
 
 # ------------------ TRC PROCESSING ------------------
 def extract_trc_info(filepath):
@@ -158,7 +175,7 @@ def merge_in_forced_order(trc_files):
         matched = 0
         for line in info["messages"]:
             match = re.search(
-                r'^\s*\d+\)?\s+([\d.]+)\s+(?:Rx|Tx)?\s*([0-9A-Fa-f]+)?\s*\d*\s*((?:[0-9A-Fa-f]{2}\s*)+)',
+                r'^\s*\d+\)?\s+([\d.]+)\s+(?:Rx|Tx|Error)?\s*([0-9A-Fa-f]+)?\s*\d*\s*((?:[0-9A-Fa-f]{2}\s*)+)',
                 line
             )
             if match:
@@ -196,11 +213,82 @@ def merge_in_forced_order(trc_files):
     print(f"\n✅ Merged TRC saved at: {output_path}")
     return output_path
 
+# ------------------ ERROR AGGREGATION ------------------
+def aggregate_can_errors(error_frames):
+    agg = defaultdict(lambda: {"count":0, "max_rx":0, "max_tx":0})
+    for err in error_frames:
+        key = (err["type"], err["direction"], err["bit_pos"])
+        agg[key]["count"] += 1
+        agg[key]["max_rx"] = max(agg[key]["max_rx"], err["rx"])
+        agg[key]["max_tx"] = max(agg[key]["max_tx"], err["tx"])
+    return agg
+
+# ------------------ PROFESSIONAL ALERT WINDOW ------------------
+def show_error_alert(error_frames):
+    if not error_frames:
+        return
+
+    agg = aggregate_can_errors(error_frames)
+
+    alert = tk.Toplevel()
+    alert.title("⚠️ CAN Error Summary")
+    alert.geometry("800x600")
+    alert.configure(bg="#1e1e1e")
+
+    tk.Label(alert, text="⚠️ CAN Error Summary", fg="white", bg="#1e1e1e",
+             font=("Segoe UI", 16, "bold")).pack(pady=(10, 5))
+
+    text_area = scrolledtext.ScrolledText(alert, wrap=tk.WORD, bg="#252526", fg="white",
+                                          font=("Consolas", 11), insertbackground="white")
+    text_area.pack(fill="both", expand=True, padx=10, pady=10)
+
+    text_area.insert(tk.END, "Detected CAN errors:\n\n")
+
+    for (etype, direction, bit_pos), info in agg.items():
+        color = {
+            "Bit Error": "#ff4d4d",
+            "Form Error": "#ff884d",
+            "Stuff Error": "#ffcc00",
+            "Other Error": "#00b3b3",
+        }.get(etype, "white")
+
+        text_area.insert(tk.END, "• Error Type: ", "bold")
+        text_area.insert(tk.END, f"{etype}\n", (etype,))
+        text_area.insert(tk.END, f"  Direction: {direction}\n", "blue")
+        text_area.insert(tk.END, f"  Bit Position: {bit_pos}\n")
+        text_area.insert(tk.END, f"  Occurrences: {info['count']}\n", "orange")
+        text_area.insert(tk.END, f"  Max RX: {info['max_rx']} | Max TX: {info['max_tx']}\n")
+        text_area.insert(tk.END, "-" * 70 + "\n", "dim")
+
+    text_area.tag_configure("bold", font=("Consolas", 11, "bold"))
+    text_area.tag_configure("dim", foreground="#888")
+    text_area.tag_configure("blue", foreground="#4da6ff")
+    text_area.tag_configure("orange", foreground="#ffb84d")
+    for err_type, color in {
+        "Bit Error": "#ff4d4d",
+        "Form Error": "#ff884d",
+        "Stuff Error": "#ffcc00",
+        "Other Error": "#00b3b3",
+    }.items():
+        text_area.tag_configure(err_type, foreground=color, font=("Consolas", 11, "bold"))
+
+    text_area.config(state=tk.DISABLED)
+
+    tk.Label(alert, text="🛠️ Recommended Action: Check wiring, CAN nodes, and 120Ω termination at both ends.",
+             fg="#99ff99", bg="#1e1e1e", font=("Segoe UI", 10, "italic")).pack(pady=(0, 10))
+
+    tk.Button(alert, text="Close", command=alert.destroy, bg="#333", fg="white",
+              font=("Segoe UI", 11), relief="raised", width=12).pack(pady=(0, 10))
+
+    alert.mainloop()
+
+# ------------------ TRC DECODING ------------------
 def parse_trc_file(trc_file, dbc):
     signal_names = set()
     decoded_rows = []
     last_known_values = {}
     file_version = None
+    error_frames = []
 
     with open(trc_file, 'r', encoding='utf-8', errors='ignore') as f:
         lines = f.readlines()
@@ -212,48 +300,42 @@ def parse_trc_file(trc_file, dbc):
 
     for line in tqdm(lines, desc="🔍 Decoding", unit="lines"):
         try:
-            if file_version == "1.1":
+            if file_version in ["1.1", "2.0"]:
                 match = re.search(
-                    r'^\s*\d+\)\s+([\d.]+)\s+(Rx|Tx)\s+([0-9A-Fa-f]+)\s+\d+\s+((?:[0-9A-Fa-f]{2}\s*)+)',
+                    r'^\s*\d+\)?\s+([\d.]+)\s+(Rx|Tx|Error)\s*([0-9A-Fa-f]+)?\s*\d*\s*((?:[0-9A-Fa-f]{2}\s*)+)',
                     line
                 )
                 if not match:
                     continue
                 timestamp = float(match.group(1)) / 1000
-                can_id = int(match.group(3), 16)
+                frame_type = match.group(2)
+                can_id = int(match.group(3), 16) if match.group(3) else 0
                 data_bytes = bytes(int(b, 16) for b in match.group(4).split())
 
-            elif file_version == "2.0":
-                match = re.search(
-                    r'^\s*\d+\s+([\d.]+)\s+\S+\s+([0-9A-Fa-f]+)\s+(Rx|Tx)\s+\d+\s+((?:[0-9A-Fa-f]{2}\s*)+)',
-                    line
-                )
-                if not match:
-                    continue
-                timestamp = float(match.group(1)) / 1000
-                can_id = int(match.group(2), 16)
-                data_bytes = bytes(int(b, 16) for b in match.group(4).split())
-            else:
-                print("❌ Unsupported TRC file version.")
-                return [], []
+                if frame_type == "Error":
+                    direction = "Sending" if data_bytes[0] == 0 else "Receiving"
+                    bit_pos = str(data_bytes[1])
+                    rx = data_bytes[2]
+                    tx = data_bytes[3]
+                    etype = {1:"Bit Error",2:"Form Error",4:"Stuff Error",8:"Other Error"}.get(can_id,"Unknown")
+                    error_frames.append({"type":etype,"direction":direction,"bit_pos":bit_pos,"rx":rx,"tx":tx})
 
             message = dbc.get_message_by_frame_id(can_id)
-            if not message:
-                continue
-
-            decoded = message.decode(data_bytes)
-            signal_names.update(decoded.keys())
-            last_known_values.update(decoded)
+            if message:
+                decoded = message.decode(data_bytes)
+                signal_names.update(decoded.keys())
+                last_known_values.update(decoded)
 
             row = {"Time (s)": round(timestamp, 6)}
             row.update(last_known_values)
             decoded_rows.append(row)
-
         except Exception:
             continue
 
+    show_error_alert(error_frames)
     return decoded_rows, ["Time (s)"] + sorted(signal_names)
 
+# ------------------ CSV WRITER ------------------
 def write_large_csv(df, base_path):
     row_limit = 1_000_000
     total_rows = len(df)
@@ -273,7 +355,7 @@ def write_large_csv(df, base_path):
 
 # ------------------ MAIN ------------------
 def main():
-    Tk().withdraw()
+    tk.Tk().withdraw()
     print("📂 Please select one or more .trc files")
     trc_files = filedialog.askopenfilenames(filetypes=[("TRC files", "*.trc")])
     if not trc_files:
@@ -313,15 +395,11 @@ def main():
 
 # ------------------ RUN ------------------
 if __name__ == "__main__":
-    # 1️⃣ Download missing files automatically
     for fname, url in URLS.items():
         path = os.path.join(BASE_DIR, fname)
         if not os.path.exists(path):
             print(f"⚡ Missing file detected: {fname}, downloading...")
             download_file(url, path)
 
-    # 2️⃣ Check for version update
     check_for_update()
-
-    # 3️⃣ Run main TRC processing
     main()
