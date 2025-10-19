@@ -14,7 +14,7 @@ def ensure_package(pkg_name, import_name=None):
         print(f"⚡ Installing {pkg_name}...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", pkg_name])
 
-# Required packages (tkinter comes with Python, no pip needed)
+# Required packages
 for pkg, imp in [("pandas", None), ("cantools", None), ("tqdm", None), ("requests", None)]:
     ensure_package(pkg, imp)
 
@@ -25,14 +25,36 @@ from tqdm import tqdm
 import requests
 from tkinter import Tk, filedialog
 
-# ------------------ FIX: Ensure paths are relative to script ------------------
+# ------------------ PATHS & URLS ------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
-LOCAL_VERSION_FILE = os.path.join(BASE_DIR, "version.txt")
-REMOTE_VERSION_URL = "https://raw.githubusercontent.com/itssatishkumar/Trc-to-CSV/refs/heads/main/version.txt"
-# ------------------------------------------------------------------------------
 
-# ------------------ UPDATE CHECK ------------------
+LOCAL_VERSION_FILE = os.path.join(BASE_DIR, "version.txt")
+REMOTE_VERSION_URL = "https://raw.githubusercontent.com/itssatishkumar/Trc-to-CSV/main/version.txt"
+
+URLS = {
+    "trc to csv.py": "https://raw.githubusercontent.com/itssatishkumar/Trc-to-CSV/main/trc%20to%20csv.py",
+    "updater.py": "https://raw.githubusercontent.com/itssatishkumar/Trc-to-CSV/main/updater.py",
+    "version.txt": "https://raw.githubusercontent.com/itssatishkumar/Trc-to-CSV/main/version.txt",
+    "can_error_reference.txt": "https://raw.githubusercontent.com/itssatishkumar/Trc-to-CSV/main/can_error_reference.txt"
+}
+
+# ------------------ HELPER FUNCTIONS ------------------
+def download_file(url, local):
+    try:
+        r = requests.get(url, timeout=10)
+        if r.status_code == 200:
+            with open(local, "wb") as f:
+                f.write(r.content)
+            print(f"✅ Downloaded {local}")
+            return True
+        else:
+            print(f"❌ Failed to download {url} ({r.status_code})")
+    except Exception as e:
+        print(f"❌ Error downloading {url}: {e}")
+    return False
+
+# ------------------ VERSION CHECK ------------------
 def get_local_version():
     if not os.path.exists(LOCAL_VERSION_FILE):
         return "0.0.0"
@@ -66,7 +88,7 @@ def check_for_update():
     else:
         print("✅ You are running the latest version.")
 
-# ------------------ TRC HANDLING ------------------
+# ------------------ TRC PROCESSING ------------------
 def extract_trc_info(filepath):
     with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
         lines = f.readlines()
@@ -249,6 +271,7 @@ def write_large_csv(df, base_path):
 
     return paths
 
+# ------------------ MAIN ------------------
 def main():
     Tk().withdraw()
     print("📂 Please select one or more .trc files")
@@ -288,6 +311,17 @@ def main():
     base_path = os.path.splitext(merged_path)[0] + "_decoded"
     write_large_csv(df, base_path)
 
+# ------------------ RUN ------------------
 if __name__ == "__main__":
+    # 1️⃣ Download missing files automatically
+    for fname, url in URLS.items():
+        path = os.path.join(BASE_DIR, fname)
+        if not os.path.exists(path):
+            print(f"⚡ Missing file detected: {fname}, downloading...")
+            download_file(url, path)
+
+    # 2️⃣ Check for version update
     check_for_update()
+
+    # 3️⃣ Run main TRC processing
     main()
