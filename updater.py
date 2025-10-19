@@ -1,9 +1,6 @@
 import os
 import sys
 import subprocess
-import requests
-import tkinter as tk
-from tkinter import messagebox
 
 # ------------------ Ensure required packages ------------------
 def ensure_package(pkg_name, import_name=None):
@@ -16,7 +13,11 @@ def ensure_package(pkg_name, import_name=None):
 
 ensure_package("requests")
 
-# ------------------ Updater settings ------------------
+import requests
+import tkinter as tk
+from tkinter import messagebox
+
+# ------------------ Updater logic ------------------
 MAIN_SCRIPT = "trc to csv.py"
 LOCAL_VERSION_FILE = "version.txt"
 
@@ -27,7 +28,7 @@ URLS = {
     "can_error_reference.txt": "https://raw.githubusercontent.com/itssatishkumar/Trc-to-CSV/main/can_error_reference.txt"
 }
 
-# ------------------ Version handling ------------------
+# ------------------ Helpers ------------------
 def read_local_version():
     if not os.path.exists(LOCAL_VERSION_FILE):
         return "0.0.0"
@@ -46,7 +47,6 @@ def fetch_remote_version():
         print(f"❌ Could not fetch remote version: {e}")
     return None
 
-# ------------------ File download ------------------
 def download_file(url, local):
     try:
         r = requests.get(url, timeout=10)
@@ -61,22 +61,17 @@ def download_file(url, local):
         print(f"❌ Error fetching {url}: {e}")
     return False
 
-# ------------------ Run main script ------------------
 def run_main():
     print("🔄 Launching main script...")
     subprocess.Popen([sys.executable, MAIN_SCRIPT])
     sys.exit(0)
 
-# ------------------ Ask user for update ------------------
 def ask_user_update():
     root = tk.Tk()
-    root.withdraw()
-    return messagebox.askyesno(
-        "Update Available",
-        "🚀 A new update is available.\nDo you want to update now?"
-    )
+    root.withdraw()  # Hide the main window
+    return messagebox.askyesno("Update Available", "🚀 A new update is available.\nDo you want to update now?")
 
-# ------------------ Updater logic ------------------
+# ------------------ Main Updater Flow ------------------
 def main():
     local_version = read_local_version()
     remote_version = fetch_remote_version() or local_version
@@ -84,37 +79,32 @@ def main():
     print(f"Local version: {local_version}")
     print(f"Remote version: {remote_version}")
 
-    files_to_download = []
-
-    # If version changed → download all
-    if remote_version != local_version:
-        files_to_download = list(URLS.keys())
-        user_agreed = ask_user_update()
-        if not user_agreed:
-            print("⏩ Skipping update by user choice.")
-            files_to_download = []  # skip downloading everything
-    else:
-        user_agreed = False  # no need to ask
-        # Version same → check for missing files
-        for fname in URLS.keys():
-            if not os.path.exists(fname):
-                files_to_download.append(fname)
-
-    # Download files
-    if files_to_download:
-        print("⬇️ Downloading files...")
-        for fname in files_to_download:
+    # 1️⃣ First, download any missing files (always)
+    missing_files = [fname for fname in URLS if not os.path.exists(fname)]
+    if missing_files:
+        print("⬇️ Downloading missing files...")
+        for fname in missing_files:
             download_file(URLS[fname], fname)
+    else:
+        print("✅ No missing files.")
 
-        # Update version.txt only if version changed
-        if remote_version != local_version and user_agreed:
+    # 2️⃣ Then check version
+    if remote_version != local_version:
+        if ask_user_update():
+            print("⬇️ Updating all files to latest version...")
+            for fname, url in URLS.items():
+                download_file(url, fname)
+
             with open(LOCAL_VERSION_FILE, "w") as f:
                 f.write(remote_version)
 
-        print("✅ Update complete.")
+            print("✅ Update complete.")
+        else:
+            print("⏩ Skipping update.")
     else:
-        print("✅ All files are up to date.")
+        print("✅ You are running the latest version.")
 
+    # 3️⃣ Launch main script
     run_main()
 
 if __name__ == "__main__":
