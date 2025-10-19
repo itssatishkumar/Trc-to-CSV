@@ -4,6 +4,7 @@ import math
 import subprocess
 import sys
 from collections import defaultdict
+import threading
 
 # ------------------ AUTO PACKAGE INSTALL ------------------
 def ensure_package(pkg_name, import_name=None):
@@ -223,102 +224,92 @@ def aggregate_can_errors(error_frames):
         agg[key]["max_tx"] = max(agg[key]["max_tx"], err["tx"])
     return agg
 
-# ------------------ PROFESSIONAL ALERT WINDOW ------------------
-def show_error_alert(error_frames):
+# ------------------ NON-BLOCKING ALERT ------------------
+def show_error_alert(root, error_frames):
     if not error_frames:
         return
+    def _show():
+        agg = aggregate_can_errors(error_frames)
+        alert = tk.Toplevel(root)
+        alert.title("⚠️ CAN Error Summary")
+        alert.geometry("800x600")
+        alert.configure(bg="#1e1e1e")
 
-    agg = aggregate_can_errors(error_frames)
+        tk.Label(alert, text="⚠️ CAN Error Summary", fg="white", bg="#1e1e1e",
+                 font=("Segoe UI", 16, "bold")).pack(pady=(10, 5))
 
-    alert = tk.Toplevel()
-    alert.title("⚠️ CAN Error Summary")
-    alert.geometry("800x600")
-    alert.configure(bg="#1e1e1e")
+        text_area = scrolledtext.ScrolledText(alert, wrap=tk.WORD, bg="#252526", fg="white",
+                                              font=("Consolas", 11), insertbackground="white")
+        text_area.pack(fill="both", expand=True, padx=10, pady=10)
+        text_area.insert(tk.END, "Detected CAN errors:\n\n")
 
-    tk.Label(alert, text="⚠️ CAN Error Summary", fg="white", bg="#1e1e1e",
-             font=("Segoe UI", 16, "bold")).pack(pady=(10, 5))
+        for (etype, direction, bit_pos), info in agg.items():
+            color = {
+                "Bit Error": "#ff4d4d",
+                "Form Error": "#ff884d",
+                "Stuff Error": "#ffcc00",
+                "Other Error": "#00b3b3",
+            }.get(etype, "white")
 
-    text_area = scrolledtext.ScrolledText(alert, wrap=tk.WORD, bg="#252526", fg="white",
-                                          font=("Consolas", 11), insertbackground="white")
-    text_area.pack(fill="both", expand=True, padx=10, pady=10)
+            text_area.insert(tk.END, f"• Error Type: {etype}\n", (etype,))
+            text_area.insert(tk.END, f"  Direction: {direction}\n", "blue")
+            text_area.insert(tk.END, f"  Bit Position: {bit_pos}\n")
+            text_area.insert(tk.END, f"  Occurrences: {info['count']}\n", "orange")
+            text_area.insert(tk.END, f"  Max RX: {info['max_rx']} | Max TX: {info['max_tx']}\n")
+            text_area.insert(tk.END, "-" * 70 + "\n", "dim")
 
-    text_area.insert(tk.END, "Detected CAN errors:\n\n")
-
-    for (etype, direction, bit_pos), info in agg.items():
-        color = {
+        text_area.tag_configure("dim", foreground="#888")
+        text_area.tag_configure("blue", foreground="#4da6ff")
+        text_area.tag_configure("orange", foreground="#ffb84d")
+        for err_type, color in {
             "Bit Error": "#ff4d4d",
             "Form Error": "#ff884d",
             "Stuff Error": "#ffcc00",
             "Other Error": "#00b3b3",
-        }.get(etype, "white")
+        }.items():
+            text_area.tag_configure(err_type, foreground=color, font=("Consolas", 11, "bold"))
 
-        text_area.insert(tk.END, "• Error Type: ", "bold")
-        text_area.insert(tk.END, f"{etype}\n", (etype,))
-        text_area.insert(tk.END, f"  Direction: {direction}\n", "blue")
-        text_area.insert(tk.END, f"  Bit Position: {bit_pos}\n")
-        text_area.insert(tk.END, f"  Occurrences: {info['count']}\n", "orange")
-        text_area.insert(tk.END, f"  Max RX: {info['max_rx']} | Max TX: {info['max_tx']}\n")
-        text_area.insert(tk.END, "-" * 70 + "\n", "dim")
+        text_area.config(state=tk.DISABLED)
+        tk.Label(alert, text="🛠️ Recommended Action: Check wiring, CAN nodes, and 120Ω termination at both ends.",
+                 fg="#99ff99", bg="#1e1e1e", font=("Segoe UI", 10, "italic")).pack(pady=(0, 10))
+        tk.Button(alert, text="Close", command=alert.destroy, bg="#333", fg="white",
+                  font=("Segoe UI", 11), relief="raised", width=12).pack(pady=(0, 10))
 
-    text_area.tag_configure("bold", font=("Consolas", 11, "bold"))
-    text_area.tag_configure("dim", foreground="#888")
-    text_area.tag_configure("blue", foreground="#4da6ff")
-    text_area.tag_configure("orange", foreground="#ffb84d")
-    for err_type, color in {
-        "Bit Error": "#ff4d4d",
-        "Form Error": "#ff884d",
-        "Stuff Error": "#ffcc00",
-        "Other Error": "#00b3b3",
-    }.items():
-        text_area.tag_configure(err_type, foreground=color, font=("Consolas", 11, "bold"))
-
-    text_area.config(state=tk.DISABLED)
-
-    tk.Label(alert, text="🛠️ Recommended Action: Check wiring, CAN nodes, and 120Ω termination at both ends.",
-             fg="#99ff99", bg="#1e1e1e", font=("Segoe UI", 10, "italic")).pack(pady=(0, 10))
-
-    tk.Button(alert, text="Close", command=alert.destroy, bg="#333", fg="white",
-              font=("Segoe UI", 11), relief="raised", width=12).pack(pady=(0, 10))
-
-    alert.mainloop()
+        alert.grab_set()
+        alert.focus()
+        alert.lift()
+    root.after(100, _show)  # schedule on main thread
 
 # ------------------ TRC DECODING ------------------
 def parse_trc_file(trc_file, dbc):
     signal_names = set()
     decoded_rows = []
     last_known_values = {}
-    file_version = None
     error_frames = []
 
     with open(trc_file, 'r', encoding='utf-8', errors='ignore') as f:
         lines = f.readlines()
 
-    for line in lines:
-        if line.startswith(";$FILEVERSION="):
-            file_version = line.split("=")[1].strip()
-            break
-
     for line in tqdm(lines, desc="🔍 Decoding", unit="lines"):
         try:
-            if file_version in ["1.1", "2.0"]:
-                match = re.search(
-                    r'^\s*\d+\)?\s+([\d.]+)\s+(Rx|Tx|Error)\s*([0-9A-Fa-f]+)?\s*\d*\s*((?:[0-9A-Fa-f]{2}\s*)+)',
-                    line
-                )
-                if not match:
-                    continue
-                timestamp = float(match.group(1)) / 1000
-                frame_type = match.group(2)
-                can_id = int(match.group(3), 16) if match.group(3) else 0
-                data_bytes = bytes(int(b, 16) for b in match.group(4).split())
+            match = re.search(
+                r'^\s*\d+\)?\s+([\d.]+)\s+(Rx|Tx|Error)\s*([0-9A-Fa-f]+)?\s*\d*\s*((?:[0-9A-Fa-f]{2}\s*)+)',
+                line
+            )
+            if not match:
+                continue
+            timestamp = float(match.group(1)) / 1000
+            frame_type = match.group(2)
+            can_id = int(match.group(3), 16) if match.group(3) else 0
+            data_bytes = bytes(int(b, 16) for b in match.group(4).split())
 
-                if frame_type == "Error":
-                    direction = "Sending" if data_bytes[0] == 0 else "Receiving"
-                    bit_pos = str(data_bytes[1])
-                    rx = data_bytes[2]
-                    tx = data_bytes[3]
-                    etype = {1:"Bit Error",2:"Form Error",4:"Stuff Error",8:"Other Error"}.get(can_id,"Unknown")
-                    error_frames.append({"type":etype,"direction":direction,"bit_pos":bit_pos,"rx":rx,"tx":tx})
+            if frame_type == "Error":
+                direction = "Sending" if data_bytes[0] == 0 else "Receiving"
+                bit_pos = str(data_bytes[1])
+                rx = data_bytes[2]
+                tx = data_bytes[3]
+                etype = {1:"Bit Error",2:"Form Error",4:"Stuff Error",8:"Other Error"}.get(can_id,"Unknown")
+                error_frames.append({"type":etype,"direction":direction,"bit_pos":bit_pos,"rx":rx,"tx":tx})
 
             message = dbc.get_message_by_frame_id(can_id)
             if message:
@@ -332,8 +323,7 @@ def parse_trc_file(trc_file, dbc):
         except Exception:
             continue
 
-    show_error_alert(error_frames)
-    return decoded_rows, ["Time (s)"] + sorted(signal_names)
+    return decoded_rows, ["Time (s)"] + sorted(signal_names), error_frames
 
 # ------------------ CSV WRITER ------------------
 def write_large_csv(df, base_path):
@@ -353,9 +343,34 @@ def write_large_csv(df, base_path):
 
     return paths
 
+# ------------------ RESAMPLE FUNCTION (FIXED) ------------------
+def resample_dataframe(df, interval_sec):
+    df = df.copy()
+    unit_row = df.iloc[0:1]
+    df_numeric = df.iloc[1:].copy()
+
+    df_numeric['Time (s)'] = pd.to_timedelta(df_numeric['Time (s)'].astype(float), unit='s')
+    df_numeric.set_index('Time (s)', inplace=True)
+
+    # --- FIX: remove duplicate timestamps before resample ---
+    df_numeric = df_numeric[~df_numeric.index.duplicated(keep='first')]
+
+    df_resampled = df_numeric.resample(f"{int(interval_sec*1000)}ms").ffill().reset_index()
+    df_resampled['Time (s)'] = df_resampled['Time (s)'].dt.total_seconds()
+
+    df_final = pd.concat([unit_row, df_resampled], ignore_index=True)
+    return df_final
+
+# ------------------ THREADED DECODE ------------------
+def decode_trc_in_thread(root, merged_path, dbc, callback):
+    def worker():
+        rows, columns, errors = parse_trc_file(merged_path, dbc)
+        root.after(0, lambda: callback(rows, columns, errors))
+    threading.Thread(target=worker, daemon=True).start()
+
 # ------------------ MAIN ------------------
-def main():
-    tk.Tk().withdraw()
+def main(root):
+    root.withdraw()
     print("📂 Please select one or more .trc files")
     trc_files = filedialog.askopenfilenames(filetypes=[("TRC files", "*.trc")])
     if not trc_files:
@@ -380,18 +395,57 @@ def main():
         print(f"❌ Failed to load DBC: {e}")
         return
 
+    interval_sec = tk.DoubleVar(value=0)
+    interval_win = tk.Toplevel(root)
+    interval_win.title("⏱️ Select Time Resolution")
+    tk.Label(interval_win, text="Select the time resolution for the output CSV:", font=("Segoe UI", 12)).pack(pady=10)
+
+    def set_interval(val):
+        interval_sec.set(val)
+        interval_win.destroy()
+
+    tk.Button(interval_win, text="Default TRC timestamps", command=lambda: set_interval(0), width=25).pack(pady=5)
+    tk.Button(interval_win, text="Resample every 300 ms", command=lambda: set_interval(0.3), width=25).pack(pady=5)
+    tk.Button(interval_win, text="Resample every 1000 ms", command=lambda: set_interval(1), width=25).pack(pady=5)
+    interval_win.grab_set()
+    root.wait_window(interval_win)
+
     print("\n🔍 Decoding merged TRC file...")
-    rows, columns = parse_trc_file(merged_path, dbc)
 
-    if not rows:
-        print("❌ No data decoded.")
-        return
+    def on_decode_done(rows, columns, errors):
+        if errors:
+            show_error_alert(root, errors)
 
-    df = pd.DataFrame(rows)
-    df = df.reindex(columns=columns)
+        if not rows:
+            print("❌ No data decoded.")
+            return
 
-    base_path = os.path.splitext(merged_path)[0] + "_decoded"
-    write_large_csv(df, base_path)
+        df = pd.DataFrame(rows)
+        df = df.reindex(columns=columns)
+
+        # ----------------- Add units -----------------
+        unit_map = {sig.name: sig.unit or "" for msg in dbc.messages for sig in msg.signals}
+        def find_unit_for_col(col_name):
+            return unit_map.get(col_name, "")
+
+        unit_row = ["s" if c=="Time (s)" else find_unit_for_col(c) for c in df.columns]
+        df_units = pd.DataFrame([unit_row], columns=df.columns)
+        df = pd.concat([df_units, df], ignore_index=True)
+
+        # ----------------- Resample -----------------
+        if interval_sec.get() > 0:
+            df = resample_dataframe(df, interval_sec.get())
+
+        base_path = os.path.splitext(merged_path)[0] + "_decoded"
+        print("\n💡 Starting CSV writing...")
+        csv_paths = write_large_csv(df, base_path)
+        print("✅ CSV writing complete!")
+
+        if csv_paths and messagebox.askyesno("Open CSV?", f"Do you want to open the first CSV file?\n{csv_paths[0]}"):
+            if os.name == "nt":
+                os.startfile(csv_paths[0])
+
+    decode_trc_in_thread(root, merged_path, dbc, on_decode_done)
 
 # ------------------ RUN ------------------
 if __name__ == "__main__":
@@ -402,4 +456,7 @@ if __name__ == "__main__":
             download_file(url, path)
 
     check_for_update()
-    main()
+
+    root = tk.Tk()
+    main(root)
+    root.mainloop()
