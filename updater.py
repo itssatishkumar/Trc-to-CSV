@@ -26,7 +26,8 @@ LOCAL_VERSION_FILE = "version.txt"
 URLS = {
     MAIN_SCRIPT: "https://raw.githubusercontent.com/itssatishkumar/Trc-to-CSV/refs/heads/main/trc%20to%20csv.py",
     "updater.py": "https://raw.githubusercontent.com/itssatishkumar/Trc-to-CSV/refs/heads/main/updater.py",
-    "version.txt": "https://raw.githubusercontent.com/itssatishkumar/Trc-to-CSV/refs/heads/main/version.txt"
+    "version.txt": "https://raw.githubusercontent.com/itssatishkumar/Trc-to-CSV/refs/heads/main/version.txt",
+    "can_error_reference.trc": "https://raw.githubusercontent.com/itssatishkumar/Trc-to-CSV/refs/heads/main/can_error_reference.trc"
 }
 
 def read_local_version():
@@ -99,3 +100,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
