@@ -23,7 +23,6 @@ from tkinter import messagebox
 MAIN_SCRIPT = "trc to csv.py"
 LOCAL_VERSION_FILE = "version.txt"
 
-# ------------------ 1.0.3 Updated URLs ------------------
 URLS = {
     MAIN_SCRIPT: "https://raw.githubusercontent.com/itssatishkumar/Trc-to-CSV/main/trc%20to%20csv.py",
     "updater.py": "https://raw.githubusercontent.com/itssatishkumar/Trc-to-CSV/main/updater.py",
