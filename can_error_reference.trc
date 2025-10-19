@@ -1,0 +1,58 @@
+Error Warnings 
+Error Warnings consist of a bit combination of error flags. The 32-bit Error Warning code is 
+contained in the first 4 data bytes in Motorola format (most significant byte first). 
+The following table lists the Error Warning flags that can be recorded in a Trace file: 
+Code 
+Short Name 
+Description 
+0x00000002 OVERRUN 
+The CAN controller receives so many messages that not 
+all of the triggered hardware interrupts can be processed 
+CAN controller was read too late. 
+0x00000004 BUSLIGHT 
+Bus error: an error counter reached the ‘light’ limit (more 
+than 0 error points). 
+0x00000008 BUSHEAVY Bus error: an error counter reached the ‘heavy’ limit (at 
+least 96 error points). 
+0x00000010 BUSOFF 
+Bus error: the CAN controller is in Bus-off state because a 
+serious and continuous error exists on the bus (255 error 
+points have been exceeded). 
+Error Frames 
+All relevant information of Error Frames is contained in the CAN ID and 4 data bytes. 
+ID: Type of Error Frame 
+1 = Bit Error 
+2 = Form Error 
+4 = Stuff Error 
+8 = Other Error 
+Data Byte 0: Direction 
+0 = Error occurred while sending  
+1 = Error occurred while receiving. 
+Data Byte 1: Current Position in Bit Stream 
+2 = ID.28 to ID.21 
+3 = Start of frame 
+4 = Bit SRTR 
+5 = BIT IDE 
+6 = ID.20 to ID.18 
+7 = ID.17 to ID.13 
+8 = CRC Sequence 
+9 = Reserved Bit 0  
+10 = Data field 
+11 = Data Length Code 
+12 = Bit RTR 
+13 = Reserved Bit 1 
+14 = ID.4 to ID.0 
+15 = ID.12 to ID.5 
+17 = Active Error Flag 
+18 = Intermission 
+19 = Tolerate dominant Bits 
+23 = Error Delimiter 
+24 = CRC Delimiter 
+25 = Acknowledge Slot 
+26 = End of Frame 
+27 = Acknowledge Limiter 
+28 = Overload Flag. 
+Data Byte 2: RX Error Counter 
+Current Value of the Receive Error counter. 
+Data Byte 3: TX Error Counter 
+Current Value of the Transmit Error counter. 
