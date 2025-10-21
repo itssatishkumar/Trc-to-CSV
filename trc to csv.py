@@ -235,7 +235,7 @@ def show_error_alert(root, error_frames):
         alert.geometry("800x600")
         alert.configure(bg="#1e1e1e")
 
-        tk.Label(alert, text="⚠️ CAN Error Summary", fg="white", bg="#1e1e1e",
+        tk.Label(alert, text="⚠️ CAN BUS Error Summary", fg="white", bg="#1e1e1e",
                  font=("Segoe UI", 16, "bold")).pack(pady=(10, 5))
 
         text_area = scrolledtext.ScrolledText(alert, wrap=tk.WORD, bg="#252526", fg="white",
