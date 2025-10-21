@@ -231,7 +231,7 @@ def show_error_alert(root, error_frames):
     def _show():
         agg = aggregate_can_errors(error_frames)
         alert = tk.Toplevel(root)
-        alert.title("⚠️ CAN Error Summary")
+        alert.title("⚠️ CAN BUS Error Summary")
         alert.geometry("800x600")
         alert.configure(bg="#1e1e1e")
 
@@ -241,7 +241,7 @@ def show_error_alert(root, error_frames):
         text_area = scrolledtext.ScrolledText(alert, wrap=tk.WORD, bg="#252526", fg="white",
                                               font=("Consolas", 11), insertbackground="white")
         text_area.pack(fill="both", expand=True, padx=10, pady=10)
-        text_area.insert(tk.END, "Detected CAN errors:\n\n")
+        text_area.insert(tk.END, "Detected CAN BUS errors:\n\n")
 
         for (etype, direction, bit_pos), info in agg.items():
             color = {
