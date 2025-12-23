@@ -25,6 +25,7 @@ from tqdm import tqdm
 import requests
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext
+from merge_csv import merge_csv_files
 
 # ------------------ PATHS & URLS ------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -372,16 +373,12 @@ def decode_trc_in_thread(root, merged_path, dbc, callback):
 def main(root):
     root.withdraw()
     print("📂 Please select one or more .trc files")
-    trc_files = filedialog.askopenfilenames(filetypes=[("TRC files", "*.trc")])
+    trc_files = list(filedialog.askopenfilenames(filetypes=[("TRC files", "*.trc")]))
     if not trc_files:
         print("❌ No TRC files selected.")
         return
 
-    try:
-        merged_path = merge_in_forced_order(trc_files)
-    except Exception as e:
-        print(f"❌ Merge failed: {e}")
-        return
+    print(f"✅ Selected {len(trc_files)} TRC file(s)")
 
     print("\n📁 Please select the .dbc file")
     dbc_file = filedialog.askopenfilename(filetypes=[("DBC files", "*.dbc")])
@@ -395,13 +392,14 @@ def main(root):
         print(f"❌ Failed to load DBC: {e}")
         return
 
-    interval_sec = tk.DoubleVar(value=0)
+    # ---------------- Time resolution selection ----------------
+    interval_var = tk.DoubleVar(value=0)
     interval_win = tk.Toplevel(root)
     interval_win.title("⏱️ Select Time Resolution")
     tk.Label(interval_win, text="Select the time resolution for the output CSV:", font=("Segoe UI", 12)).pack(pady=10)
 
     def set_interval(val):
-        interval_sec.set(val)
+        interval_var.set(val)
         interval_win.destroy()
 
     tk.Button(interval_win, text="Default TRC timestamps", command=lambda: set_interval(0), width=25).pack(pady=5)
@@ -410,42 +408,139 @@ def main(root):
     interval_win.grab_set()
     root.wait_window(interval_win)
 
-    print("\n🔍 Decoding merged TRC file...")
+    selected_interval = float(interval_var.get())
 
-    def on_decode_done(rows, columns, errors):
-        if errors:
-            show_error_alert(root, errors)
+    # If multiple TRCs are selected, sort them by $STARTTIME from the TRC header
+    ordered_trc_files = list(trc_files)
+    if len(trc_files) > 1:
+        try:
+            infos = [extract_trc_info(f) for f in trc_files]
+            infos = [i for i in infos if i.get("start_timestamp") is not None]
+            if len(infos) == len(trc_files):
+                infos.sort(key=lambda x: x["start_timestamp"])
+                ordered_trc_files = [i["file"] for i in infos]
+
+                print("\n🕒 TRC files sorted by start time:")
+                for i in infos:
+                    print(f"- {os.path.basename(i['file']):20} → $STARTTIME = {i['start_timestamp']} → {i['start_time_str']}")
+        except Exception as e:
+            print(f"⚠️ Could not sort TRC files by start time, using selection order. Reason: {e}")
+
+    # ---------------- Single TRC: keep threaded behavior ----------------
+    if len(ordered_trc_files) == 1:
+        trc_path = ordered_trc_files[0]
+        print(f"\n🔍 Decoding TRC file: {os.path.basename(trc_path)}")
+
+        def on_decode_done(rows, columns, errors):
+            if errors:
+                show_error_alert(root, errors)
+
+            if not rows:
+                print("❌ No data decoded.")
+                return
+
+            df = pd.DataFrame(rows)
+            df = df.reindex(columns=columns)
+
+            # ----------------- Add units -----------------
+            unit_map = {sig.name: sig.unit or "" for msg in dbc.messages for sig in msg.signals}
+
+            def find_unit_for_col(col_name):
+                return unit_map.get(col_name, "")
+
+            unit_row = ["s" if c == "Time (s)" else find_unit_for_col(c) for c in df.columns]
+            df_units = pd.DataFrame([unit_row], columns=df.columns)
+            df = pd.concat([df_units, df], ignore_index=True)
+
+            # ----------------- Resample -----------------
+            if selected_interval > 0:
+                df = resample_dataframe(df, selected_interval)
+
+            base_path = os.path.splitext(trc_path)[0] + "_decoded"
+            print("\n💡 Starting CSV writing...")
+            csv_paths = write_large_csv(df, base_path)
+            print("✅ CSV writing complete!")
+
+            if csv_paths and messagebox.askyesno("Open CSV?", f"Do you want to open the first CSV file?\n{csv_paths[0]}"):
+                if os.name == "nt":
+                    os.startfile(csv_paths[0])
+
+        decode_trc_in_thread(root, trc_path, dbc, on_decode_done)
+        return
+
+    # ---------------- Multiple TRCs: per‑file CSV + merge ----------------
+    print("\n🔍 Decoding multiple TRC files one by one...")
+
+    all_error_frames = []
+    all_csv_paths = []
+
+    for trc_path in ordered_trc_files:
+        print(f"\n▶ Processing {os.path.basename(trc_path)}")
+        try:
+            rows, columns, errors = parse_trc_file(trc_path, dbc)
+        except Exception as e:
+            print(f"❌ Failed to decode {trc_path}: {e}")
+            continue
+
+        all_error_frames.extend(errors or [])
 
         if not rows:
-            print("❌ No data decoded.")
-            return
+            print(f"❌ No data decoded for {trc_path}. Skipping.")
+            continue
 
         df = pd.DataFrame(rows)
         df = df.reindex(columns=columns)
 
         # ----------------- Add units -----------------
         unit_map = {sig.name: sig.unit or "" for msg in dbc.messages for sig in msg.signals}
+
         def find_unit_for_col(col_name):
             return unit_map.get(col_name, "")
 
-        unit_row = ["s" if c=="Time (s)" else find_unit_for_col(c) for c in df.columns]
+        unit_row = ["s" if c == "Time (s)" else find_unit_for_col(c) for c in df.columns]
         df_units = pd.DataFrame([unit_row], columns=df.columns)
         df = pd.concat([df_units, df], ignore_index=True)
 
         # ----------------- Resample -----------------
-        if interval_sec.get() > 0:
-            df = resample_dataframe(df, interval_sec.get())
+        if selected_interval > 0:
+            df = resample_dataframe(df, selected_interval)
 
-        base_path = os.path.splitext(merged_path)[0] + "_decoded"
-        print("\n💡 Starting CSV writing...")
+        base_path = os.path.splitext(trc_path)[0] + "_decoded"
+        print("💡 Writing CSV for this TRC...")
         csv_paths = write_large_csv(df, base_path)
-        print("✅ CSV writing complete!")
+        all_csv_paths.extend(csv_paths)
 
-        if csv_paths and messagebox.askyesno("Open CSV?", f"Do you want to open the first CSV file?\n{csv_paths[0]}"):
-            if os.name == "nt":
-                os.startfile(csv_paths[0])
+    if all_error_frames:
+        show_error_alert(root, all_error_frames)
 
-    decode_trc_in_thread(root, merged_path, dbc, on_decode_done)
+    if not all_csv_paths:
+        print("❌ No CSV files were created from the selected TRCs.")
+        return
+
+    # ---------------- Merge all per‑TRC CSVs into one ----------------
+    output_dir = os.path.dirname(all_csv_paths[0])
+    final_csv = os.path.join(output_dir, "merged_decoded.csv")
+
+    try:
+        print("\n🧩 Merging all decoded CSV files into a single CSV...")
+        merge_csv_files(all_csv_paths, final_csv, open_after=False)
+    except Exception as e:
+        print(f"❌ Failed to merge CSV files: {e}")
+        return
+
+    # ---------------- Delete temporary per‑TRC CSV files ----------------
+    for path in all_csv_paths:
+        try:
+            os.remove(path)
+            print(f"🗑️ Deleted temporary CSV: {path}")
+        except OSError as e:
+            print(f"⚠️ Could not delete temporary CSV {path}: {e}")
+
+    print(f"\n✅ Final merged CSV created: {final_csv}")
+
+    if messagebox.askyesno("Open merged CSV?", f"Do you want to open the merged CSV file?\n{final_csv}"):
+        if os.name == "nt":
+            os.startfile(final_csv)
 
 # ------------------ RUN ------------------
 if __name__ == "__main__":
