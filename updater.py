@@ -23,6 +23,7 @@ LOCAL_VERSION_FILE = os.path.join(BASE_DIR, "version.txt")
 
 URLS = {
     MAIN_SCRIPT: "https://raw.githubusercontent.com/itssatishkumar/Trc-to-CSV/main/trc%20to%20csv.py",
+    "merge_csv.py": "https://raw.githubusercontent.com/itssatishkumar/Trc-to-CSV/main/merge_csv.py",
     "updater.py": "https://raw.githubusercontent.com/itssatishkumar/Trc-to-CSV/main/updater.py",
     "version.txt": "https://raw.githubusercontent.com/itssatishkumar/Trc-to-CSV/main/version.txt",
     "can_error_reference.txt": "https://raw.githubusercontent.com/itssatishkumar/Trc-to-CSV/main/can_error_reference.txt"
