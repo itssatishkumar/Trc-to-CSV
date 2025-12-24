@@ -36,6 +36,7 @@ REMOTE_VERSION_URL = "https://raw.githubusercontent.com/itssatishkumar/Trc-to-CS
 
 URLS = {
     "trc to csv.py": "https://raw.githubusercontent.com/itssatishkumar/Trc-to-CSV/main/trc%20to%20csv.py",
+    "merge_csv.py": "https://raw.githubusercontent.com/itssatishkumar/Trc-to-CSV/main/merge_csv.py",
     "updater.py": "https://raw.githubusercontent.com/itssatishkumar/Trc-to-CSV/main/updater.py",
     "version.txt": "https://raw.githubusercontent.com/itssatishkumar/Trc-to-CSV/main/version.txt",
     "can_error_reference.txt": "https://raw.githubusercontent.com/itssatishkumar/Trc-to-CSV/main/can_error_reference.txt"
@@ -517,13 +518,18 @@ def main(root):
         print("❌ No CSV files were created from the selected TRCs.")
         return
 
-    # ---------------- Merge all per‑TRC CSVs into one ----------------
+    # ---------------- Merge all per‑TRC CSVs into one (with splitting) ----------------
     output_dir = os.path.dirname(all_csv_paths[0])
     final_csv = os.path.join(output_dir, "merged_decoded.csv")
 
     try:
-        print("\n🧩 Merging all decoded CSV files into a single CSV...")
-        merge_csv_files(all_csv_paths, final_csv, open_after=False)
+        print("\n🧩 Merging all decoded CSV files into one or more CSVs (with row limit)...")
+        merged_paths = merge_csv_files(
+            all_csv_paths,
+            final_csv,
+            open_after=False,
+            row_limit=1_000_000,
+        )
     except Exception as e:
         print(f"❌ Failed to merge CSV files: {e}")
         return
@@ -536,11 +542,18 @@ def main(root):
         except OSError as e:
             print(f"⚠️ Could not delete temporary CSV {path}: {e}")
 
-    print(f"\n✅ Final merged CSV created: {final_csv}")
+    # merged_paths may be None (older merge_csv_files behavior), so
+    # fall back to the single final_csv path when needed.
+    if isinstance(merged_paths, list) and merged_paths:
+        first_csv = merged_paths[0]
+        print(f"\n✅ Final merged CSV file(s) created. First file: {first_csv}")
+    else:
+        first_csv = final_csv
+        print(f"\n✅ Final merged CSV created: {final_csv}")
 
-    if messagebox.askyesno("Open merged CSV?", f"Do you want to open the merged CSV file?\n{final_csv}"):
+    if messagebox.askyesno("Open merged CSV?", f"Do you want to open the first merged CSV file?\n{first_csv}"):
         if os.name == "nt":
-            os.startfile(final_csv)
+            os.startfile(first_csv)
 
 # ------------------ RUN ------------------
 if __name__ == "__main__":
