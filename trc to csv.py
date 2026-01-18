@@ -20,11 +20,76 @@ for pkg, imp in [("pandas", None), ("cantools", None), ("tqdm", None), ("request
 
 # ------------------ IMPORTS ------------------
 import pandas as pd
+_TRC_LINE_RE_OLD = re.compile(
+    r'^\s*\d+\)?\s+'
+    r'([\d.]+)\s+'
+    r'(Rx|Tx|Error)\s*'
+    r'([0-9A-Fa-f]+)?\s*'
+    r'\d*\s*'
+    r'((?:[0-9A-Fa-f]{2}\s*)+)',
+)
+
+_TRC_LINE_RE_PCAN = re.compile(
+    r'^\s*'
+    r'(\d+)\s+'
+    r'([\d.]+)\s+'
+    r'([A-Za-z]{1,4})\s+'
+    r'([0-9A-Fa-f]{3,8})\s+'
+    r'(Rx|Tx|Error)\s+'
+    r'(\d+)'
+    r'(?:\s+(.*))?'
+    r'$',
+)
+
+
+def _parse_trc_line(line: str):
+    """Parse one TRC line.
+
+    Supports:
+    - Existing format: "<n>) <ms> Rx|Tx|Error <id> <dlc> <data...>"
+    - PCAN-View format: "<n> <ms> DT <id> Rx|Tx <dlc> <data...>"
+
+    Returns:
+        (timestamp_s, frame_type, can_id_int, data_bytes) or None
+    """
+    match = _TRC_LINE_RE_OLD.search(line)
+    if match:
+        timestamp_s = float(match.group(1)) / 1000.0
+        frame_type = match.group(2)
+        can_id = int(match.group(3), 16) if match.group(3) else 0
+        data_bytes = bytes(int(b, 16) for b in match.group(4).split())
+        return timestamp_s, frame_type, can_id, data_bytes
+
+    match = _TRC_LINE_RE_PCAN.search(line)
+    if match:
+        timestamp_s = float(match.group(2)) / 1000.0
+        pcan_type = (match.group(3) or "").upper()
+        frame_type = match.group(5)  # Rx|Tx|Error
+        can_id = int(match.group(4), 16)
+        try:
+            dlc = int(match.group(6))
+        except ValueError:
+            dlc = 0
+
+        remainder = match.group(7) or ""
+        hex_tokens = re.findall(r'\b[0-9A-Fa-f]{2}\b', remainder)
+        if dlc > 0:
+            hex_tokens = hex_tokens[:dlc]
+        data_bytes = bytes(int(b, 16) for b in hex_tokens)
+
+        # Treat PCAN error rows as Error frames when present.
+        if pcan_type in {"ER", "ERR", "ERROR"}:
+            frame_type = "Error"
+
+        return timestamp_s, frame_type, can_id, data_bytes
+
+    return None
+
 import cantools
 from tqdm import tqdm
 import requests
 import tkinter as tk
-from tkinter import filedialog, messagebox, scrolledtext
+from tkinter import filedialog, messagebox, scrolledtext, ttk
 from merge_csv import merge_csv_files
 
 # ------------------ PATHS & URLS ------------------
@@ -42,6 +107,128 @@ URLS = {
     "can_error_reference.txt": "https://raw.githubusercontent.com/itssatishkumar/Trc-to-CSV/main/can_error_reference.txt"
 }
 
+# ------------------ DBC SOURCES ------------------
+DBC_URLS = {
+    "CIP BMS-24X": "https://raw.githubusercontent.com/itssatishkumar/CAN-SCRIPT-LOGGER/main/CIP%20BMS-24X.dbc",
+    "G2A nBMS": "https://raw.githubusercontent.com/itssatishkumar/CAN-SCRIPT-LOGGER/main/G2A%20nBMS.dbc",
+    "G2B LR200 nBMS": "https://raw.githubusercontent.com/itssatishkumar/CAN-SCRIPT-LOGGER/main/G2B_LR200%20nBMS.dbc",
+    "ION BMS": "https://raw.githubusercontent.com/itssatishkumar/CAN-SCRIPT-LOGGER/main/ION_BMS.dbc",
+    "Marvel 3W (all variants)": "https://raw.githubusercontent.com/itssatishkumar/CAN-SCRIPT-LOGGER/main/Marvel_3W_all_variant.dbc",
+    "Athena 4 / 5": "https://raw.githubusercontent.com/itssatishkumar/CAN-SCRIPT-LOGGER/main/Athena%204%265.dbc",
+}
+
+def select_dbc_file(root):
+    """Popup to select a DBC source from a single dropdown.
+
+    Returns:
+        - One of the keys from DBC_URLS (str), or
+        - A local .dbc file path (str) when "Load Custom DBC..." is used, or
+        - None if the dialog is cancelled/closed.
+    """
+
+    custom_label = "Load Custom DBC..."
+    dbc_options = list(DBC_URLS.keys()) + [custom_label]
+    selection = {"value": None}
+
+    win = tk.Toplevel(root)
+    win.title("Select DBC Source")
+    win.resizable(False, False)
+
+    popup_w, popup_h = 460, 160
+    try:
+        sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
+        x = max(0, (sw - popup_w) // 2)
+        y = max(0, (sh - popup_h) // 3)
+        win.geometry(f"{popup_w}x{popup_h}+{x}+{y}")
+    except Exception:
+        win.geometry(f"{popup_w}x{popup_h}")
+
+    def close_without_selection():
+        selection["value"] = None
+        win.destroy()
+
+    win.protocol("WM_DELETE_WINDOW", close_without_selection)
+    win.bind("<Escape>", lambda _e: close_without_selection())
+
+    container = ttk.Frame(win, padding=16)
+    container.pack(fill="both", expand=True)
+
+    ttk.Label(container, text="Select DBC:", font=("Segoe UI", 11)).grid(row=0, column=0, sticky="w")
+
+    choice_var = tk.StringVar(value="")
+    combo = ttk.Combobox(
+        container,
+        textvariable=choice_var,
+        values=dbc_options,
+        state="readonly",
+        width=42,
+        font=("Segoe UI", 11),
+    )
+    combo.grid(row=1, column=0, columnspan=2, sticky="we", pady=(8, 12))
+    combo.current(0)
+
+    container.grid_columnconfigure(0, weight=1)
+
+    def choose_custom_and_close():
+        path = filedialog.askopenfilename(
+            filetypes=[("DBC files", "*.dbc"), ("All files", "*.*")],
+            parent=win,
+            title="Select a DBC file",
+        )
+        if path:
+            selection["value"] = path
+            win.destroy()
+        else:
+            # Reset back to first built-in option if user cancels
+            combo.current(0)
+
+    def on_ok():
+        value = (choice_var.get() or "").strip()
+        if not value:
+            return
+        if value == custom_label:
+            choose_custom_and_close()
+            return
+        selection["value"] = value
+        win.destroy()
+
+    def on_change(_event=None):
+        # If user selects custom, immediately open file dialog
+        if choice_var.get() == custom_label:
+            choose_custom_and_close()
+
+    combo.bind("<<ComboboxSelected>>", on_change)
+
+    buttons = ttk.Frame(container)
+    buttons.grid(row=2, column=0, columnspan=2, sticky="e")
+    ttk.Button(buttons, text="Cancel", command=close_without_selection).pack(side="right", padx=(8, 0))
+    ttk.Button(buttons, text="OK", command=on_ok).pack(side="right")
+
+    # Make sure it shows and gets focus
+    win.update_idletasks()
+    try:
+        win.deiconify()
+    except Exception:
+        pass
+    win.lift()
+    try:
+        win.attributes("-topmost", True)
+        win.after(250, lambda: win.attributes("-topmost", False))
+    except Exception:
+        pass
+    try:
+        combo.focus_set()
+    except Exception:
+        pass
+
+    win.grab_set()
+    root.wait_window(win)
+    return selection["value"]
+
+
+# Backwards-compatible name (older code paths may still call this)
+def select_dbc_dialog(root):
+    return select_dbc_file(root)
 # ------------------ HELPER FUNCTIONS ------------------
 def download_file(url, local):
     try:
@@ -177,15 +364,9 @@ def merge_in_forced_order(trc_files):
     for info in file_infos:
         matched = 0
         for line in info["messages"]:
-            match = re.search(
-                r'^\s*\d+\)?\s+([\d.]+)\s+(?:Rx|Tx|Error)?\s*([0-9A-Fa-f]+)?\s*\d*\s*((?:[0-9A-Fa-f]{2}\s*)+)',
-                line
-            )
-            if match:
-                try:
-                    offset_ms = float(match.group(1))
-                except ValueError:
-                    continue
+            parsed = _parse_trc_line(line)
+            if parsed:
+                offset_ms = parsed[0] * 1000.0
                 abs_time = info["start_timestamp"] + (offset_ms / 1000.0)
                 new_offset_ms = (abs_time - global_start_time) * 1000
                 new_offset_str = f"{new_offset_ms:10.1f}"
@@ -284,9 +465,29 @@ def show_error_alert(root, error_frames):
 
 # ------------------ TRC DECODING ------------------
 def parse_trc_file(trc_file, dbc):
+    # Pre-seed all signal columns from the loaded DBC so columns are not dropped
+    # even if a given CAN ID never appears in the TRC.
     signal_names = set()
+    signal_to_can_id = {}  # signal name -> message frame_id
+    try:
+        for msg in getattr(dbc, "messages", []) or []:
+            frame_id = getattr(msg, "frame_id", None)
+            for sig in getattr(msg, "signals", []) or []:
+                sig_name = getattr(sig, "name", None)
+                if not sig_name:
+                    continue
+                signal_names.add(sig_name)
+                # If the same signal name exists in multiple messages, keep the first mapping
+                # (the codebase historically assumes signal names are unique).
+                signal_to_can_id.setdefault(sig_name, frame_id)
+    except Exception:
+        # If anything unexpected happens, fall back to discovering signals dynamically.
+        signal_names = set()
+        signal_to_can_id = {}
+
     decoded_rows = []
-    last_known_values = {}
+    last_known_values = {}  # signal name -> last value
+    last_seen_time = {}  # can_id -> last timestamp (seconds)
     error_frames = []
 
     with open(trc_file, 'r', encoding='utf-8', errors='ignore') as f:
@@ -294,18 +495,15 @@ def parse_trc_file(trc_file, dbc):
 
     for line in tqdm(lines, desc="🔍 Decoding", unit="lines"):
         try:
-            match = re.search(
-                r'^\s*\d+\)?\s+([\d.]+)\s+(Rx|Tx|Error)\s*([0-9A-Fa-f]+)?\s*\d*\s*((?:[0-9A-Fa-f]{2}\s*)+)',
-                line
-            )
-            if not match:
+            parsed = _parse_trc_line(line)
+            if not parsed:
                 continue
-            timestamp = float(match.group(1)) / 1000
-            frame_type = match.group(2)
-            can_id = int(match.group(3), 16) if match.group(3) else 0
-            data_bytes = bytes(int(b, 16) for b in match.group(4).split())
+
+            timestamp, frame_type, can_id, data_bytes = parsed
 
             if frame_type == "Error":
+                if len(data_bytes) < 4:
+                    continue
                 direction = "Sending" if data_bytes[0] == 0 else "Receiving"
                 bit_pos = str(data_bytes[1])
                 rx = data_bytes[2]
@@ -316,11 +514,24 @@ def parse_trc_file(trc_file, dbc):
             message = dbc.get_message_by_frame_id(can_id)
             if message:
                 decoded = message.decode(data_bytes)
-                signal_names.update(decoded.keys())
-                last_known_values.update(decoded)
+                last_seen_time[can_id] = timestamp
+                for sig, val in decoded.items():
+                    last_known_values[sig] = val
+                    # In case we couldn't pre-seed from dbc.messages
+                    signal_names.add(sig)
+                    signal_to_can_id.setdefault(sig, can_id)
 
+            # Build row with timeout logic
             row = {"Time (s)": round(timestamp, 6)}
-            row.update(last_known_values)
+            for sig in signal_names:
+                # Per-CAN-ID staleness rule: if the message (frame id) hasn't appeared
+                # in >1.0s, then all its signals are written as "NA".
+                sig_can_id = signal_to_can_id.get(sig)
+                seen_time = last_seen_time.get(sig_can_id)
+                if seen_time is not None and (timestamp - seen_time) <= 1.0 and sig in last_known_values:
+                    row[sig] = last_known_values[sig]
+                else:
+                    row[sig] = "NA"
             decoded_rows.append(row)
         except Exception:
             continue
@@ -371,6 +582,7 @@ def decode_trc_in_thread(root, merged_path, dbc, callback):
     threading.Thread(target=worker, daemon=True).start()
 
 # ------------------ MAIN ------------------
+
 def main(root):
     root.withdraw()
     print("📂 Please select one or more .trc files")
@@ -381,14 +593,23 @@ def main(root):
 
     print(f"✅ Selected {len(trc_files)} TRC file(s)")
 
-    print("\n📁 Please select the .dbc file")
-    dbc_file = filedialog.askopenfilename(filetypes=[("DBC files", "*.dbc")])
-    if not dbc_file:
-        print("❌ No DBC file selected.")
+    # --- DBC selection dialog ---
+    print("\n📁 Please select the DBC source")
+    dbc_source = select_dbc_file(root)
+    if not dbc_source:
+        print("❌ No DBC source selected.")
         return
 
     try:
-        dbc = cantools.database.load_file(dbc_file)
+        if dbc_source in DBC_URLS:
+            print(f"🌐 Fetching DBC from GitHub: {dbc_source}")
+            dbc_url = DBC_URLS[dbc_source]
+            resp = requests.get(dbc_url, timeout=15)
+            resp.raise_for_status()
+            dbc = cantools.database.load_string(resp.text)
+        else:
+            print(f"📁 Loading your DBC file: {dbc_source}")
+            dbc = cantools.database.load_file(dbc_source)
     except Exception as e:
         print(f"❌ Failed to load DBC: {e}")
         return
@@ -405,6 +626,7 @@ def main(root):
 
     tk.Button(interval_win, text="Default TRC timestamps", command=lambda: set_interval(0), width=25).pack(pady=5)
     tk.Button(interval_win, text="Resample every 300 ms", command=lambda: set_interval(0.3), width=25).pack(pady=5)
+    tk.Button(interval_win, text="Resample every 500 ms", command=lambda: set_interval(0.5), width=25).pack(pady=5)
     tk.Button(interval_win, text="Resample every 1000 ms", command=lambda: set_interval(1), width=25).pack(pady=5)
     interval_win.grab_set()
     root.wait_window(interval_win)
