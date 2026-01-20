@@ -117,6 +117,82 @@ DBC_URLS = {
     "Athena 4 / 5": "https://raw.githubusercontent.com/itssatishkumar/CAN-SCRIPT-LOGGER/main/Athena%204%265.dbc",
 }
 
+
+def _looks_like_html(text: str) -> bool:
+    head = (text or "").lstrip()[:200].lower()
+    return head.startswith("<!doctype html") or head.startswith("<html") or "<head" in head
+
+
+def _unwrap_semicolon_terminated_statements(text: str) -> str:
+    """Fixes DBC files that were hard-wrapped mid-line.
+
+    Some DBCs (especially long VAL_/CM_/BA_ lines) get wrapped with newlines,
+    which makes them invalid for cantools. This reconstructs those statements
+    by concatenating lines until the trailing ';' is found and quotes balance.
+    """
+
+    if not text:
+        return text
+
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    lines = text.split("\n")
+
+    starters = {
+        "VAL_",
+        "CM_",
+        "BA_",
+        "BA_DEF_",
+        "BA_DEF_DEF_",
+        "VAL_TABLE_",
+        "SIG_VALTYPE_",
+    }
+
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.lstrip()
+        keyword = stripped.split(None, 1)[0] if stripped else ""
+
+        if keyword in starters:
+            buf = line.rstrip()
+            while i + 1 < len(lines):
+                # Stop if statement seems complete: ends with ';' and quotes are balanced.
+                if buf.strip().endswith(";") and (buf.count('"') % 2 == 0):
+                    break
+
+                i += 1
+                cont = lines[i].strip()
+                # Preserve separation so tokens don't merge.
+                buf = f"{buf} {cont}" if cont else f"{buf} "
+
+            out.append(buf)
+        else:
+            out.append(line)
+
+        i += 1
+
+    return "\n".join(out)
+
+
+def fetch_and_load_dbc_from_url(dbc_url: str):
+    resp = requests.get(dbc_url, timeout=15)
+    resp.raise_for_status()
+
+    # Prefer Requests' decoded text but guard against bad encodings.
+    if not resp.encoding:
+        try:
+            resp.encoding = resp.apparent_encoding
+        except Exception:
+            pass
+
+    text = (resp.text or "").lstrip("\ufeff")
+    if _looks_like_html(text):
+        raise ValueError("Downloaded HTML instead of a DBC. The GitHub URL likely isn't a raw .dbc file.")
+
+    text = _unwrap_semicolon_terminated_statements(text)
+    return cantools.database.load_string(text, strict=False)
+
 def select_dbc_file(root):
     """Popup to select a DBC source from a single dropdown.
 
@@ -574,6 +650,44 @@ def resample_dataframe(df, interval_sec):
     df_final = pd.concat([unit_row, df_resampled], ignore_index=True)
     return df_final
 
+
+def _add_cip_derived_values(df: pd.DataFrame) -> pd.DataFrame:
+    """Add derived columns for the CIP BMS-24X DBC.
+
+    Note: This must run on the numeric dataframe (before adding the units row).
+    """
+
+    df = df.copy()
+
+    cell_cols = [
+        "CMU_1_CV1","CMU_1_CV2","CMU_1_CV3","CMU_1_CV4",
+        "CMU_1_CV5","CMU_1_CV6","CMU_1_CV7","CMU_1_CV8",
+        "CMU_1_CV9",
+        "CMU_2_CV1","CMU_2_CV2","CMU_2_CV3","CMU_2_CV4",
+        "CMU_2_CV5","CMU_2_CV6","CMU_2_CV7","CMU_2_CV8",
+        "CMU_2_CV9",
+    ]
+
+    temp_cols = [
+        "Temperature_1","Temperature_2","Temperature_3",
+        "Temperature_4","Temperature_5","Temperature_6",
+    ]
+
+    existing_cell_cols = [c for c in cell_cols if c in df.columns]
+    existing_temp_cols = [c for c in temp_cols if c in df.columns]
+
+    if existing_cell_cols:
+        cell_vals = df[existing_cell_cols].apply(pd.to_numeric, errors="coerce")
+        df[" Max. Cell Voltage [mV]"] = cell_vals.max(axis=1)
+        df[" Min. Cell Voltage [mV]"] = cell_vals.min(axis=1)
+
+    if existing_temp_cols:
+        temp_vals = df[existing_temp_cols].apply(pd.to_numeric, errors="coerce")
+        df["Temp_Max_degC"] = temp_vals.max(axis=1)
+        df["Temp_Min_degC"] = temp_vals.min(axis=1)
+
+    return df
+
 # ------------------ THREADED DECODE ------------------
 def decode_trc_in_thread(root, merged_path, dbc, callback):
     def worker():
@@ -600,13 +714,13 @@ def main(root):
         print("❌ No DBC source selected.")
         return
 
+    is_cip_dbc = (dbc_source == "CIP BMS-24X")
+
     try:
         if dbc_source in DBC_URLS:
             print(f"🌐 Fetching DBC from GitHub: {dbc_source}")
             dbc_url = DBC_URLS[dbc_source]
-            resp = requests.get(dbc_url, timeout=15)
-            resp.raise_for_status()
-            dbc = cantools.database.load_string(resp.text)
+            dbc = fetch_and_load_dbc_from_url(dbc_url)
         else:
             print(f"📁 Loading your DBC file: {dbc_source}")
             dbc = cantools.database.load_file(dbc_source)
@@ -665,10 +779,23 @@ def main(root):
             df = pd.DataFrame(rows)
             df = df.reindex(columns=columns)
 
+            # ----------------- CIP-derived values (no filtering) -----------------
+            derived_units = {}
+            if is_cip_dbc:
+                df = _add_cip_derived_values(df)
+                derived_units = {
+                    " Max. Cell Voltage [mV]": "mV",
+                    " Min. Cell Voltage [mV]": "mV",
+                    "Temp_Max_degC": "degC",
+                    "Temp_Min_degC": "degC",
+                }
+
             # ----------------- Add units -----------------
             unit_map = {sig.name: sig.unit or "" for msg in dbc.messages for sig in msg.signals}
 
             def find_unit_for_col(col_name):
+                if col_name in derived_units:
+                    return derived_units[col_name]
                 return unit_map.get(col_name, "")
 
             unit_row = ["s" if c == "Time (s)" else find_unit_for_col(c) for c in df.columns]
@@ -714,10 +841,23 @@ def main(root):
         df = pd.DataFrame(rows)
         df = df.reindex(columns=columns)
 
+        # ----------------- CIP-derived values (no filtering) -----------------
+        derived_units = {}
+        if is_cip_dbc:
+            df = _add_cip_derived_values(df)
+            derived_units = {
+                " Max. Cell Voltage [mV]": "mV",
+                " Min. Cell Voltage [mV]": "mV",
+                "Temp_Max_degC": "degC",
+                "Temp_Min_degC": "degC",
+            }
+
         # ----------------- Add units -----------------
         unit_map = {sig.name: sig.unit or "" for msg in dbc.messages for sig in msg.signals}
 
         def find_unit_for_col(col_name):
+            if col_name in derived_units:
+                return derived_units[col_name]
             return unit_map.get(col_name, "")
 
         unit_row = ["s" if c == "Time (s)" else find_unit_for_col(c) for c in df.columns]
