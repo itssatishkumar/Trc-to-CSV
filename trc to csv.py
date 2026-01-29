@@ -924,7 +924,7 @@ def show_choice_menu(root):
     
     choice_win = tk.Toplevel(root)
     choice_win.title("📊 Select Conversion Type")
-    choice_win.geometry("350x200")
+    choice_win.geometry("400x220")
     choice_win.resizable(False, False)
     
     # Center the window
