@@ -14,9 +14,16 @@ def _detect_and_strip_unit_row(df: pd.DataFrame):
 
     first_row = df.iloc[0]
     is_unit_row = False
+    # Check for Time or Time (s) column to detect unit row
+    time_col = None
     if "Time (s)" in df.columns:
+        time_col = "Time (s)"
+    elif "Time" in df.columns:
+        time_col = "Time"
+    
+    if time_col is not None:
         try:
-            float(str(first_row["Time (s)"]))
+            float(str(first_row[time_col]))
         except (TypeError, ValueError):
             is_unit_row = True
 
@@ -71,7 +78,10 @@ def merge_csv_files(
                 seen.add(col)
                 all_columns.append(col)
 
-    if "Time (s)" in seen:
+    # Prioritize Time column first, then Time (s) for backwards compatibility
+    if "Time" in seen:
+        all_columns = ["Time"] + [c for c in all_columns if c != "Time"]
+    elif "Time (s)" in seen:
         all_columns = ["Time (s)"] + [c for c in all_columns if c != "Time (s)"]
 
     normalized = [df.reindex(columns=all_columns) for df in dataframes]
