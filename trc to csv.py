@@ -815,7 +815,13 @@ def main(root):
                 if os.name == "nt":
                     os.startfile(csv_paths[0])
 
-        decode_trc_in_thread(root, trc_path, dbc, on_decode_done)
+        # Run decoding synchronously for single-file mode so the function
+        # doesn't return and destroy the Tk root before the worker completes.
+        try:
+            rows, columns, errors = parse_trc_file(trc_path, dbc)
+            on_decode_done(rows, columns, errors)
+        except Exception as e:
+            print(f"❌ Failed to decode {trc_path}: {e}")
         return
 
     # ---------------- Multiple TRCs: per‑file CSV + merge ----------------
