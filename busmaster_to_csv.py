@@ -278,6 +278,22 @@ def _extract_fields(parts):
     return time_str, can_id_tok, dlc, data_hex
 
 
+def _get_start_time_from_file(log_path):
+    """
+    Extract the START DATE AND TIME from a BUSMASTER log file.
+    Returns datetime object or None if not found.
+    """
+    try:
+        with open(log_path, "r", errors="replace") as f:
+            for line in f:
+                maybe_start = _parse_start_dt_from_line(line)
+                if maybe_start is not None:
+                    return maybe_start
+    except Exception:
+        pass
+    return None
+
+
 # ------------------- DATAFRAME FUNCTIONS -------------------
 def write_large_csv(df, base_path):
     """Write DataFrame to CSV, splitting if needed"""
@@ -441,10 +457,31 @@ def parse_logs_to_csv_with_sampling(
     sampling_interval=0,
 ):
     """Parse multiple logs, decode, optionally resample, and merge"""
+    # Sort files by their START DATE AND TIME
+    print("\n🔄 Sorting files by START DATE AND TIME...")
+    files_with_start_time = []
+    
+    for log_path in log_paths:
+        start_time = _get_start_time_from_file(log_path)
+        if start_time is not None:
+            files_with_start_time.append((start_time, log_path))
+            print(f"  📄 {os.path.basename(log_path)}: {start_time}")
+        else:
+            print(f"  ⚠️ {os.path.basename(log_path)}: No START DATE AND TIME found, processing last")
+            files_with_start_time.append((datetime.max, log_path))
+    
+    # Sort by start time
+    files_with_start_time.sort(key=lambda x: x[0])
+    sorted_log_paths = [path for _, path in files_with_start_time]
+    
+    print(f"\n✅ Files sorted by start time. Processing order:")
+    for i, log_path in enumerate(sorted_log_paths, 1):
+        print(f"  {i}. {os.path.basename(log_path)}")
+    
     all_csv_paths = []
     last_known = {}
 
-    for log_path in log_paths:
+    for log_path in sorted_log_paths:
         print(f"\n📄 Processing: {log_path}")
         df, last_known = parse_log_file_to_dataframe(log_path, dbc, carry_state_from=last_known)
         
