@@ -315,20 +315,69 @@ def write_large_csv(df, base_path):
 
 
 def resample_dataframe(df, interval_sec):
-    """Resample DataFrame to specified time interval"""
+    """Resample DataFrame to specified time interval.
+
+    This function supports DataFrames created by `parse_log_file_to_dataframe` that
+    include an `AbsDatetime` column (datetime objects) and an original `Time`
+    column (BUSMASTER-style string). After resampling, the `Time` column is
+    regenerated in the BUSMASTER format for each resampled timestamp.
+    """
     df = df.copy()
     unit_row = df.iloc[0:1]
     df_numeric = df.iloc[1:].copy()
 
+    # If we have absolute datetimes, resample by time index and regenerate BUSMASTER-style
+    # timestamps in the `Time` column. Otherwise fall back to previous seconds-based behavior.
+    if 'AbsDatetime' in df_numeric.columns:
+        df_numeric['AbsDatetime'] = pd.to_datetime(df_numeric['AbsDatetime'])
+        df_numeric.set_index('AbsDatetime', inplace=True)
+
+        # Remove duplicate timestamps before resample
+        df_numeric = df_numeric[~df_numeric.index.duplicated(keep='first')]
+
+        df_resampled = df_numeric.resample(f"{int(interval_sec*1000)}ms").ffill().reset_index()
+
+        # Recreate BUSMASTER-style Time strings from the resampled datetimes
+        def _fmt_busmaster(dt, session_start=None, elapsed_mode=False):
+            if elapsed_mode and session_start is not None:
+                delta = dt - pd.to_datetime(session_start)
+                total_seconds = int(delta.total_seconds())
+                h = total_seconds // 3600
+                m = (total_seconds % 3600) // 60
+                s = total_seconds % 60
+                sub = int(dt.microsecond // 100)
+                return f"{h}:{m:02d}:{s:02d}:{sub:04d}"
+            else:
+                h = dt.hour
+                m = dt.minute
+                s = dt.second
+                sub = int(dt.microsecond // 100)
+                return f"{h:02d}:{m:02d}:{s:02d}:{sub:04d}"
+
+        # If the original unit row specifies a session start, try to read it
+        session_start = None
+        elapsed_mode = False
+        if 'SessionStart' in df_numeric.columns:
+            session_start = df_numeric['SessionStart'].iloc[0]
+            elapsed_mode = bool(df_numeric.get('ElapsedMode', False).iloc[0])
+
+        df_resampled['Time'] = df_resampled['AbsDatetime'].apply(lambda dt: _fmt_busmaster(dt, session_start, elapsed_mode))
+
+        # Drop helper columns from final output
+        if 'SessionStart' in df_resampled.columns:
+            df_resampled = df_resampled.drop(columns=['SessionStart'], errors='ignore')
+        if 'ElapsedMode' in df_resampled.columns:
+            df_resampled = df_resampled.drop(columns=['ElapsedMode'], errors='ignore')
+
+        df_final = pd.concat([unit_row, df_resampled.drop(columns=['AbsDatetime'])], ignore_index=True)
+        return df_final
+
+    # Fallback: previous behavior using numeric seconds in 'Time (s)'
     df_numeric['Time (s)'] = pd.to_timedelta(df_numeric['Time (s)'].astype(float), unit='s')
     df_numeric.set_index('Time (s)', inplace=True)
-
-    # Remove duplicate timestamps before resample
     df_numeric = df_numeric[~df_numeric.index.duplicated(keep='first')]
-
     df_resampled = df_numeric.resample(f"{int(interval_sec*1000)}ms").ffill().reset_index()
     df_resampled['Time (s)'] = df_resampled['Time (s)'].dt.total_seconds()
-
     df_final = pd.concat([unit_row, df_resampled], ignore_index=True)
     return df_final
 
@@ -342,11 +391,12 @@ def parse_log_file_to_dataframe(
     """Parse a single log file and return DataFrame with Time (s) column"""
     message_map = {msg.frame_id: msg for msg in dbc.messages}
 
-    rows = {}  # abs_dt -> (abs_dt_float, snapshot)
+    rows = {}  # abs_dt -> (abs_dt, time_str, snapshot)
     last_known = carry_state_from.copy() if carry_state_from else {}
 
     parsed = 0
     skipped = 0
+    elapsed_mode = False  # Initialize elapsed_mode flag
 
     with open(log_path, "r", errors="replace") as f:
         session_start = None
@@ -380,6 +430,11 @@ def parse_log_file_to_dataframe(
 
             time_str, can_id_tok, dlc, data_hex = fields
 
+            # Detect if the log encodes elapsed-time mode (HH > 23)
+            parts_check = _parse_time_parts(time_str)
+            if parts_check is not None and parts_check[0] > 23:
+                elapsed_mode = True
+
             abs_dt, current_date_base = _abs_dt(
                 session_start=session_start,
                 current_date_base=current_date_base,
@@ -412,8 +467,8 @@ def parse_log_file_to_dataframe(
 
                 snapshot.update(decoded)
 
-                # Store reference time in seconds since first message
-                rows[abs_dt] = (abs_dt, snapshot)
+                # Store reference time, original time string, and snapshot
+                rows[abs_dt] = (abs_dt, time_str, snapshot)
                 parsed += 1
 
             except Exception:
@@ -422,32 +477,35 @@ def parse_log_file_to_dataframe(
 
     # Convert to DataFrame
     ordered = OrderedDict((k, rows[k]) for k in sorted(rows.keys()))
-    all_signals = sorted({sig for (_, snap) in ordered.values() for sig in snap.keys()})
+    all_signals = sorted({sig for (_, _, snap) in ordered.values() for sig in snap.keys()})
 
     if not ordered:
         print(f"⚠️ No messages decoded from {log_path}")
-        return None, last_known
+        return None, last_known, session_start, elapsed_mode
 
-    # Calculate time in seconds from first message
+    # Calculate output rows including original BUSMASTER time strings and absolute datetimes
     first_dt = list(ordered.keys())[0]
     data = []
-    for abs_dt, (_, snap) in ordered.items():
-        time_sec = (abs_dt - first_dt).total_seconds()
-        row = {"Time (s)": time_sec}
+    for abs_dt, (_, time_str, snap) in ordered.items():
+        row = {"Time": time_str, "AbsDatetime": abs_dt, "SessionStart": session_start, "ElapsedMode": elapsed_mode}
         row.update({sig: snap.get(sig, "") for sig in all_signals})
         data.append(row)
 
     df = pd.DataFrame(data)
     
     # Add units row at the beginning
-    unit_row = {"Time (s)": "s"}
+    unit_row = {"Time": "busmaster"}
     for sig in all_signals:
         unit_row[sig] = ""
+    # include helper unit cells so columns align
+    unit_row["AbsDatetime"] = ""
+    unit_row["SessionStart"] = ""
+    unit_row["ElapsedMode"] = ""
     
     df = pd.concat([pd.DataFrame([unit_row]), df], ignore_index=True)
 
     print(f"✅ Parsed {log_path}: {parsed} messages, {skipped} skipped")
-    return df, last_known
+    return df, last_known, session_start, elapsed_mode
 
 
 def parse_logs_to_csv_with_sampling(
@@ -483,7 +541,7 @@ def parse_logs_to_csv_with_sampling(
 
     for log_path in sorted_log_paths:
         print(f"\n📄 Processing: {log_path}")
-        df, last_known = parse_log_file_to_dataframe(log_path, dbc, carry_state_from=last_known)
+        df, last_known, session_start, elapsed_mode = parse_log_file_to_dataframe(log_path, dbc, carry_state_from=last_known)
         
         if df is None:
             continue
@@ -491,11 +549,16 @@ def parse_logs_to_csv_with_sampling(
         # Apply resampling if requested
         if sampling_interval > 0:
             print(f"⏱️ Resampling to {sampling_interval*1000}ms intervals...")
+            # pass session_start and elapsed_mode so resampling can regenerate BUSMASTER-format timestamps
             df = resample_dataframe(df, sampling_interval)
 
-        # Write to CSV
+        # Write to CSV (drop internal helper columns first)
         base_path = os.path.splitext(log_path)[0] + "_decoded"
-        csv_paths = write_large_csv(df, base_path)
+        df_to_write = df.copy()
+        for _col in ("AbsDatetime", "SessionStart", "ElapsedMode"):
+            if _col in df_to_write.columns:
+                del df_to_write[_col]
+        csv_paths = write_large_csv(df_to_write, base_path)
         all_csv_paths.extend(csv_paths)
 
     if not all_csv_paths:
