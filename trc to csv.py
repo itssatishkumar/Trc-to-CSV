@@ -539,6 +539,8 @@ def show_error_alert(root, error_frames):
         alert.lift()
     root.after(100, _show)  # schedule on main thread
 
+SPECIAL_TIME_CAN_ID = 0x405
+
 # ------------------ TRC DECODING ------------------
 def parse_trc_file(trc_file, dbc):
     # Pre-seed all signal columns from the loaded DBC so columns are not dropped
@@ -548,6 +550,8 @@ def parse_trc_file(trc_file, dbc):
     try:
         for msg in getattr(dbc, "messages", []) or []:
             frame_id = getattr(msg, "frame_id", None)
+            if frame_id == SPECIAL_TIME_CAN_ID:
+                continue
             for sig in getattr(msg, "signals", []) or []:
                 sig_name = getattr(sig, "name", None)
                 if not sig_name:
@@ -587,15 +591,39 @@ def parse_trc_file(trc_file, dbc):
                 etype = {1:"Bit Error",2:"Form Error",4:"Stuff Error",8:"Other Error"}.get(can_id,"Unknown")
                 error_frames.append({"type":etype,"direction":direction,"bit_pos":bit_pos,"rx":rx,"tx":tx})
 
-            message = dbc.get_message_by_frame_id(can_id)
-            if message:
-                decoded = message.decode(data_bytes)
+            # --------------------------------------------------
+            # SPECIAL HANDLING FOR 0x405 (TIME/DATE FRAME)
+            # --------------------------------------------------
+            if can_id == SPECIAL_TIME_CAN_ID and len(data_bytes) >= 6:
+
+                hex_bytes = [f"{b:02X}" for b in data_bytes]
+
+                # TIME = Byte 0,1,2
+                time_str = f"{hex_bytes[0]}:{hex_bytes[1]}:{hex_bytes[2]}"
+
+                # DATE = Byte 3,4,5
+                date_str = f"{hex_bytes[3]}:{hex_bytes[4]}:{hex_bytes[5]}"
+
+                last_known_values["TIME"] = time_str
+                last_known_values["DATE"] = date_str
+
+                signal_names.add("TIME")
+                signal_names.add("DATE")
+
+                signal_to_can_id["TIME"] = can_id
+                signal_to_can_id["DATE"] = can_id
+
                 last_seen_time[can_id] = timestamp
-                for sig, val in decoded.items():
-                    last_known_values[sig] = val
-                    # In case we couldn't pre-seed from dbc.messages
-                    signal_names.add(sig)
-                    signal_to_can_id.setdefault(sig, can_id)
+
+            else:
+                message = dbc.get_message_by_frame_id(can_id)
+                if message:
+                    decoded = message.decode(data_bytes)
+                    last_seen_time[can_id] = timestamp
+                    for sig, val in decoded.items():
+                        last_known_values[sig] = val
+                        signal_names.add(sig)
+                        signal_to_can_id.setdefault(sig, can_id)
 
             # Build row with timeout logic
             row = {"Time (s)": round(timestamp, 6)}
@@ -612,7 +640,16 @@ def parse_trc_file(trc_file, dbc):
         except Exception:
             continue
 
-    return decoded_rows, ["Time (s)"] + sorted(signal_names), error_frames
+    # ------------------ COLUMN ORDER FIX ------------------
+    ordered_signals = sorted(signal_names)
+    # Force DATE and TIME to be adjacent and first (after Time (s))
+    if "DATE" in ordered_signals:
+        ordered_signals.remove("DATE")
+    if "TIME" in ordered_signals:
+        ordered_signals.remove("TIME")
+        ordered_signals = ["DATE", "TIME"] + ordered_signals
+
+    return decoded_rows, ["Time (s)"] + ordered_signals, error_frames
 
 # ------------------ CSV WRITER ------------------
 def write_large_csv(df, base_path):
