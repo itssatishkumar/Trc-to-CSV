@@ -4,6 +4,8 @@ import math
 import subprocess
 import sys
 from collections import defaultdict
+from mf4_to_trc import main as mf4_to_trc_main
+from mf4_to_csv import main as mf4_to_csv_main
 import threading
 
 # ------------------ AUTO PACKAGE INSTALL ------------------
@@ -962,47 +964,74 @@ def main(root):
 
 # ------------------ CHOICE MENU ------------------
 def show_choice_menu(root):
-    """Show menu to choose between TRC to CSV or LOG to CSV"""
+    """Show menu to choose conversion type"""
     root.withdraw()
     
     choice_win = tk.Toplevel(root)
     choice_win.title("📊 Select Conversion Type")
-    choice_win.geometry("400x220")
+    choice_win.geometry("420x360")
     choice_win.resizable(False, False)
-    
-    # Center the window
     choice_win.grab_set()
     
     choice_var = tk.IntVar()
     
     tk.Label(
-        choice_win, 
-        text="Select conversion type:", 
+        choice_win,
+        text="Select conversion type:",
         font=("Segoe UI", 14, "bold"),
         pady=10
     ).pack()
-    
+
+    # --- Existing Options ---
     tk.Button(
         choice_win,
         text="🚀 TRC to CSV",
         font=("Segoe UI", 12),
-        width=25,
+        width=28,
         height=2,
         command=lambda: (choice_var.set(1), choice_win.destroy())
-    ).pack(pady=10)
-    
+    ).pack(pady=8)
+
     tk.Button(
         choice_win,
         text="📄 LOG to CSV (BUSMASTER)",
         font=("Segoe UI", 12),
-        width=25,
+        width=28,
         height=2,
         command=lambda: (choice_var.set(2), choice_win.destroy())
-    ).pack(pady=10)
-    
+    ).pack(pady=8)
+
+    # --- New Separator ---
+    ttk.Separator(choice_win, orient='horizontal').pack(fill='x', pady=12)
+
+    tk.Label(
+        choice_win,
+        text="Additional Conversions:",
+        font=("Segoe UI", 11, "italic")
+    ).pack()
+
+    # --- New Options ---
+    tk.Button(
+        choice_win,
+        text="🔁 MF4 to TRC",
+        font=("Segoe UI", 12),
+        width=28,
+        height=2,
+        command=lambda: (choice_var.set(3), choice_win.destroy())
+    ).pack(pady=8)
+
+    tk.Button(
+        choice_win,
+        text="📊 MF4 to CSV",
+        font=("Segoe UI", 12),
+        width=28,
+        height=2,
+        command=lambda: (choice_var.set(4), choice_win.destroy())
+    ).pack(pady=8)
+
     choice_win.focus()
     root.wait_window(choice_win)
-    
+
     return choice_var.get()
 
 # ------------------ RUN ------------------
@@ -1023,19 +1052,28 @@ if __name__ == "__main__":
     if choice == 1:
         # TRC to CSV
         main(root)
-        # After conversion finish, close the hidden root window instead of
-        # deiconifying it (which shows a small empty "tk" window).
         try:
             root.destroy()
         except Exception:
             pass
+
     elif choice == 2:
-        # LOG to CSV (BUSMASTER)
+        # BUSMASTER LOG to CSV
         from busmaster_to_csv import main as busmaster_main
-        
         root.deiconify()
         busmaster_main(root)
         root.mainloop()
+
+    elif choice == 3:
+        mf4_to_trc_main(root)
+        root.destroy()
+
+    elif choice == 4:
+        mf4_to_csv_main(root)
+        root.destroy()
+
+
     else:
         print("❌ No option selected.")
         root.destroy()
+
