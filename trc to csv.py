@@ -846,6 +846,7 @@ def main(root):
             base_path = os.path.splitext(trc_path)[0] + "_decoded"
             print("\n💡 Starting CSV writing...")
             csv_paths = write_large_csv(df, base_path)
+            all_csv_paths.extend(csv_paths)
             print("✅ CSV writing complete!")
 
             if csv_paths and messagebox.askyesno("Open CSV?", f"Do you want to open the first CSV file?\n{csv_paths[0]}"):
@@ -859,8 +860,7 @@ def main(root):
             on_decode_done(rows, columns, errors)
         except Exception as e:
             print(f"❌ Failed to decode {trc_path}: {e}")
-        return
-
+        
     # ---------------- Multiple TRCs: per‑file CSV + merge ----------------
     print("\n🔍 Decoding multiple TRC files one by one...")
 
