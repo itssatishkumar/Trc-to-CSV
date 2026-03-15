@@ -1,11 +1,9 @@
 import os
 import math
 from typing import Iterable, List
-
 import pandas as pd
 
 OUTPUT_FILE = "merged.csv"
-
 
 def _detect_and_strip_unit_row(df: pd.DataFrame):
     """Detect unit row and remove it."""
@@ -69,8 +67,15 @@ def merge_csv_files(
 
         units, df_no_units = _detect_and_strip_unit_row(df)
 
-        all_units.update({k: v for k, v in units.items() if v is not None})
+        # -----------------------------
+        # REMOVE FIRST 25 ROWS FROM EACH CSV
+        # -----------------------------
+        if len(df_no_units) > 25:
+            df_no_units = df_no_units.iloc[25:].reset_index(drop=True)
+        else:
+            df_no_units = df_no_units.iloc[0:0]
 
+        all_units.update({k: v for k, v in units.items() if v is not None})
         dataframes.append(df_no_units)
 
     if not dataframes:
@@ -104,33 +109,12 @@ def merge_csv_files(
     merged_df = pd.concat(normalized, ignore_index=True)
 
     # -----------------------------
-    # Remove first second of TIME
-    # -----------------------------
-
-    if "TIME" in merged_df.columns:
-
-        time_series = merged_df["TIME"].dropna()
-
-        if not time_series.empty:
-
-            first_time = pd.to_datetime(time_series.iloc[0], format="%H:%M:%S")
-
-            threshold = (first_time + pd.Timedelta(seconds=1)).time()
-
-            merged_df = merged_df[
-                pd.to_datetime(merged_df["TIME"], format="%H:%M:%S").dt.time >= threshold
-            ].reset_index(drop=True)
-
-    # -----------------------------
     # Add unit row
     # -----------------------------
 
     if all_units:
-
         unit_row = [all_units.get(col, "") for col in all_columns]
-
         units_df = pd.DataFrame([unit_row], columns=all_columns)
-
         final_df = pd.concat([units_df, merged_df], ignore_index=True)
 
     else:
@@ -141,7 +125,6 @@ def merge_csv_files(
     # -----------------------------
 
     tmp = final_df.replace(r"^\s*$", pd.NA, regex=True)
-
     final_df = tmp.dropna(how="all").reset_index(drop=True)
 
     # -----------------------------
@@ -149,14 +132,10 @@ def merge_csv_files(
     # -----------------------------
 
     if len(final_df) > 1:
-
         data_only = final_df.iloc[1:]
-
         tmp_cols = data_only.replace(r"^\s*$", pd.NA, regex=True)
-
         cols_to_keep = ~tmp_cols.isna().all(axis=0)
 
-        # Always keep DATE/TIME columns
         if "DATE" in final_df.columns:
             cols_to_keep["DATE"] = True
 
@@ -175,11 +154,8 @@ def merge_csv_files(
     if row_limit is not None and row_limit > 0:
 
         total_rows = len(final_df)
-
         total_parts = math.ceil(total_rows / row_limit)
-
         base, ext = os.path.splitext(output_file)
-
         output_paths: List[str] = []
 
         print(
@@ -191,17 +167,11 @@ def merge_csv_files(
 
             start = i * row_limit
             end = (i + 1) * row_limit
-
             chunk = final_df.iloc[start:end]
-
             suffix = "" if i == 0 else f"_part{i+1}"
-
             path = f"{base}{suffix}{ext}"
-
             chunk.to_csv(path, index=False)
-
             output_paths.append(path)
-
             print(f"✔ Saved: {path} ({len(chunk)} rows)")
 
         if open_after and output_paths:
@@ -211,7 +181,6 @@ def merge_csv_files(
                 print(f"Could not open file: {e}")
 
         print(f"Merged {len(csv_list)} CSV files into {len(output_paths)} output file(s).")
-
         return output_paths
 
     # -----------------------------
@@ -244,10 +213,7 @@ if __name__ == "__main__":
     )
 
     root.destroy()
-
     csv_files = list(csv_files)
-
     if not csv_files:
         raise RuntimeError("No CSV files selected")
-
     merge_csv_files(csv_files, OUTPUT_FILE, open_after=True)
