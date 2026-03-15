@@ -848,9 +848,31 @@ def main(root):
             csv_paths = write_large_csv(df, base_path)
             print("✅ CSV writing complete!")
 
-            if csv_paths and messagebox.askyesno("Open CSV?", f"Do you want to open the first CSV file?\n{csv_paths[0]}"):
+            # Run CSV through merge script even for single TRC
+            output_dir = os.path.dirname(csv_paths[0])
+            final_csv = os.path.join(output_dir, "merged_decoded.csv")
+
+            print("🧩 Running CSV post-processing...")
+            merged_paths = merge_csv_files(
+                csv_paths,
+                final_csv,
+                open_after=False,
+                row_limit=1_000_000,
+            )
+
+            # Delete temporary CSV files
+            for path in csv_paths:
+                try:
+                    os.remove(path)
+                    print(f"🗑️ Deleted temporary CSV: {path}")
+                except OSError as e:
+                    print(f"⚠️ Could not delete temporary CSV {path}: {e}")
+
+            first_csv = merged_paths[0] if isinstance(merged_paths, list) else final_csv
+
+            if messagebox.askyesno("Open CSV?", f"Do you want to open the CSV file?\n{first_csv}"):
                 if os.name == "nt":
-                    os.startfile(csv_paths[0])
+                    os.startfile(first_csv)
 
         # Run decoding synchronously for single-file mode so the function
         # doesn't return and destroy the Tk root before the worker completes.
