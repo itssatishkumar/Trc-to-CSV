@@ -541,6 +541,36 @@ def show_error_alert(root, error_frames):
 
 SPECIAL_TIME_CAN_ID = 0x405
 
+def get_signal_order(dbc, signal_names):
+
+    order_map = {}
+
+    # read CSV_ORDER attribute from dbc signals
+    for msg in dbc.messages:
+        for sig in msg.signals:
+            try:
+                attr = sig.dbc.attributes.get("CSV_ORDER")
+                if attr is not None:
+                    order_map[sig.name] = attr.value
+            except Exception:
+                pass
+
+    priority = []
+    remaining = []
+
+    for sig in signal_names:
+        if sig in order_map:
+            priority.append((order_map[sig], sig))
+        else:
+            remaining.append(sig)
+
+    # sort priority by defined order
+    priority.sort(key=lambda x: x[0])
+
+    ordered = [s for _, s in priority] + sorted(remaining)
+
+    return ordered
+
 # ------------------ TRC DECODING ------------------
 def parse_trc_file(trc_file, dbc):
     # Pre-seed all signal columns from the loaded DBC so columns are not dropped
@@ -641,14 +671,14 @@ def parse_trc_file(trc_file, dbc):
             continue
 
     # ------------------ COLUMN ORDER FIX ------------------
-    ordered_signals = sorted(signal_names)
+    ordered_signals = get_signal_order(dbc, signal_names)
+
     # Force DATE and TIME to be adjacent and first (after Time (s))
     if "DATE" in ordered_signals:
         ordered_signals.remove("DATE")
     if "TIME" in ordered_signals:
         ordered_signals.remove("TIME")
-        ordered_signals = ["DATE", "TIME"] + ordered_signals
-
+    ordered_signals = ["DATE", "TIME"] + ordered_signals
     return decoded_rows, ["Time (s)"] + ordered_signals, error_frames
 
 # ------------------ CSV WRITER ------------------
