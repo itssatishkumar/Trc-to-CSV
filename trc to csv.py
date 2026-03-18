@@ -610,6 +610,19 @@ def parse_trc_file(trc_file, dbc):
                 continue
 
             timestamp, frame_type, can_id, data_bytes = parsed
+            # ------------------ BMS FIRMWARE (0x7A1) ------------------
+            if can_id == 0x7A1 and len(data_bytes) >= 4:
+                if data_bytes[0] == 0x02:
+
+                    major = data_bytes[1]
+                    minor = data_bytes[2]
+                    patch = data_bytes[3]
+                    fw_str = f"{major:02d}.{minor:02d}.{patch:02d}"
+                    last_known_values["BMS_Firmware"] = fw_str
+                    signal_names.add("BMS_Firmware")
+                    signal_to_can_id["BMS_Firmware"] = can_id
+
+                    last_seen_time[can_id] = timestamp
 
             if frame_type == "Error":
                 if len(data_bytes) < 4:
@@ -672,13 +685,21 @@ def parse_trc_file(trc_file, dbc):
 
     # ------------------ COLUMN ORDER FIX ------------------
     ordered_signals = get_signal_order(dbc, signal_names)
+    if "BMS_Firmware" in ordered_signals:
+        ordered_signals.remove("BMS_Firmware")
 
-    # Force DATE and TIME to be adjacent and first (after Time (s))
+    # Remove DATE/TIME first
     if "DATE" in ordered_signals:
         ordered_signals.remove("DATE")
     if "TIME" in ordered_signals:
         ordered_signals.remove("TIME")
+
+    # Put DATE, TIME first
     ordered_signals = ["DATE", "TIME"] + ordered_signals
+
+    # Add firmware LAST
+    if "BMS_Firmware" in signal_names:
+        ordered_signals.append("BMS_Firmware")
     return decoded_rows, ["Time (s)"] + ordered_signals, error_frames
 
 # ------------------ CSV WRITER ------------------
