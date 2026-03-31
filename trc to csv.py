@@ -43,15 +43,6 @@ _TRC_LINE_RE_PCAN = re.compile(
 
 
 def _parse_trc_line(line: str):
-    """Parse one TRC line.
-
-    Supports:
-    - Existing format: "<n>) <ms> Rx|Tx|Error <id> <dlc> <data...>"
-    - PCAN-View format: "<n> <ms> DT <id> Rx|Tx <dlc> <data...>"
-
-    Returns:
-        (timestamp_s, frame_type, can_id_int, data_bytes) or None
-    """
     match = _TRC_LINE_RE_OLD.search(line)
     if match:
         timestamp_s = float(match.group(1)) / 1000.0
@@ -124,12 +115,6 @@ def _looks_like_html(text: str) -> bool:
 
 
 def _unwrap_semicolon_terminated_statements(text: str) -> str:
-    """Fixes DBC files that were hard-wrapped mid-line.
-
-    Some DBCs (especially long VAL_/CM_/BA_ lines) get wrapped with newlines,
-    which makes them invalid for cantools. This reconstructs those statements
-    by concatenating lines until the trailing ';' is found and quotes balance.
-    """
 
     if not text:
         return text
@@ -194,13 +179,6 @@ def fetch_and_load_dbc_from_url(dbc_url: str):
     return cantools.database.load_string(text, strict=False)
 
 def select_dbc_file(root):
-    """Popup to select a DBC source from a single dropdown.
-
-    Returns:
-        - One of the keys from DBC_URLS (str), or
-        - A local .dbc file path (str) when "Load Custom DBC..." is used, or
-        - None if the dialog is cancelled/closed.
-    """
 
     custom_label = "Load Custom DBC..."
     dbc_options = list(DBC_URLS.keys()) + [custom_label]
@@ -732,7 +710,7 @@ def resample_dataframe(df, interval_sec):
     # --- FIX: remove duplicate timestamps before resample ---
     df_numeric = df_numeric[~df_numeric.index.duplicated(keep='first')]
 
-    df_resampled = df_numeric.resample(f"{int(interval_sec*1000)}ms").ffill().reset_index()
+    df_resampled = df_numeric.resample(f"{int(interval_sec*1000)}ms").ffill(limit=2).reset_index()
     df_resampled['Time (s)'] = df_resampled['Time (s)'].dt.total_seconds()
 
     df_final = pd.concat([unit_row, df_resampled], ignore_index=True)
@@ -740,11 +718,6 @@ def resample_dataframe(df, interval_sec):
 
 
 def _add_cip_derived_values(df: pd.DataFrame) -> pd.DataFrame:
-    """Add derived columns for the CIP BMS-24X DBC.
-
-    Note: This must run on the numeric dataframe (before adding the units row).
-    """
-
     df = df.copy()
 
     cell_cols = [
