@@ -67,8 +67,6 @@ def _parse_trc_line(line: str):
         if dlc > 0:
             hex_tokens = hex_tokens[:dlc]
         data_bytes = bytes(int(b, 16) for b in hex_tokens)
-
-        # Treat PCAN error rows as Error frames when present.
         if pcan_type in {"ER", "ERR", "ERROR"}:
             frame_type = "Error"
 
@@ -113,7 +111,6 @@ def _looks_like_html(text: str) -> bool:
     head = (text or "").lstrip()[:200].lower()
     return head.startswith("<!doctype html") or head.startswith("<html") or "<head" in head
 
-
 def _unwrap_semicolon_terminated_statements(text: str) -> str:
 
     if not text:
@@ -142,13 +139,11 @@ def _unwrap_semicolon_terminated_statements(text: str) -> str:
         if keyword in starters:
             buf = line.rstrip()
             while i + 1 < len(lines):
-                # Stop if statement seems complete: ends with ';' and quotes are balanced.
                 if buf.strip().endswith(";") and (buf.count('"') % 2 == 0):
                     break
 
                 i += 1
                 cont = lines[i].strip()
-                # Preserve separation so tokens don't merge.
                 buf = f"{buf} {cont}" if cont else f"{buf} "
 
             out.append(buf)
@@ -159,12 +154,9 @@ def _unwrap_semicolon_terminated_statements(text: str) -> str:
 
     return "\n".join(out)
 
-
 def fetch_and_load_dbc_from_url(dbc_url: str):
     resp = requests.get(dbc_url, timeout=15)
     resp.raise_for_status()
-
-    # Prefer Requests' decoded text but guard against bad encodings.
     if not resp.encoding:
         try:
             resp.encoding = resp.apparent_encoding
@@ -233,7 +225,6 @@ def select_dbc_file(root):
             selection["value"] = path
             win.destroy()
         else:
-            # Reset back to first built-in option if user cancels
             combo.current(0)
 
     def on_ok():
@@ -247,7 +238,6 @@ def select_dbc_file(root):
         win.destroy()
 
     def on_change(_event=None):
-        # If user selects custom, immediately open file dialog
         if choice_var.get() == custom_label:
             choose_custom_and_close()
 
@@ -258,7 +248,6 @@ def select_dbc_file(root):
     ttk.Button(buttons, text="Cancel", command=close_without_selection).pack(side="right", padx=(8, 0))
     ttk.Button(buttons, text="OK", command=on_ok).pack(side="right")
 
-    # Make sure it shows and gets focus
     win.update_idletasks()
     try:
         win.deiconify()
@@ -278,9 +267,6 @@ def select_dbc_file(root):
     win.grab_set()
     root.wait_window(win)
     return selection["value"]
-
-
-# Backwards-compatible name (older code paths may still call this)
 def select_dbc_dialog(root):
     return select_dbc_file(root)
 # ------------------ HELPER FUNCTIONS ------------------
@@ -515,7 +501,7 @@ def show_error_alert(root, error_frames):
         alert.grab_set()
         alert.focus()
         alert.lift()
-    root.after(100, _show)  # schedule on main thread
+    root.after(100, _show)
 
 SPECIAL_TIME_CAN_ID = 0x405
 
@@ -541,8 +527,6 @@ def get_signal_order(dbc, signal_names):
             priority.append((order_map[sig], sig))
         else:
             remaining.append(sig)
-
-    # sort priority by defined order
     priority.sort(key=lambda x: x[0])
 
     ordered = [s for _, s in priority] + sorted(remaining)
@@ -551,10 +535,8 @@ def get_signal_order(dbc, signal_names):
 
 # ------------------ TRC DECODING ------------------
 def parse_trc_file(trc_file, dbc):
-    # Pre-seed all signal columns from the loaded DBC so columns are not dropped
-    # even if a given CAN ID never appears in the TRC.
     signal_names = set()
-    signal_to_can_id = {}  # signal name -> message frame_id
+    signal_to_can_id = {}
     try:
         for msg in getattr(dbc, "messages", []) or []:
             frame_id = getattr(msg, "frame_id", None)
@@ -565,11 +547,8 @@ def parse_trc_file(trc_file, dbc):
                 if not sig_name:
                     continue
                 signal_names.add(sig_name)
-                # If the same signal name exists in multiple messages, keep the first mapping
-                # (the codebase historically assumes signal names are unique).
                 signal_to_can_id.setdefault(sig_name, frame_id)
     except Exception:
-        # If anything unexpected happens, fall back to discovering signals dynamically.
         signal_names = set()
         signal_to_can_id = {}
 
@@ -646,11 +625,8 @@ def parse_trc_file(trc_file, dbc):
                         signal_names.add(sig)
                         signal_to_can_id.setdefault(sig, can_id)
 
-            # Build row with timeout logic
             row = {"Time (s)": round(timestamp, 6)}
             for sig in signal_names:
-                # Per-CAN-ID staleness rule: if the message (frame id) hasn't appeared
-                # in >1.0s, then all its signals are written as "NA".
                 sig_can_id = signal_to_can_id.get(sig)
                 seen_time = last_seen_time.get(sig_can_id)
                 if seen_time is not None and (timestamp - seen_time) <= 1.0 and sig in last_known_values:
@@ -706,8 +682,6 @@ def resample_dataframe(df, interval_sec):
 
     df_numeric['Time (s)'] = pd.to_timedelta(df_numeric['Time (s)'].astype(float), unit='s')
     df_numeric.set_index('Time (s)', inplace=True)
-
-    # --- FIX: remove duplicate timestamps before resample ---
     df_numeric = df_numeric[~df_numeric.index.duplicated(keep='first')]
 
     df_resampled = df_numeric.resample(f"{int(interval_sec*1000)}ms").ffill(limit=2).reset_index()
@@ -871,8 +845,6 @@ def main(root):
             print("\n💡 Starting CSV writing...")
             csv_paths = write_large_csv(df, base_path)
             print("✅ CSV writing complete!")
-
-            # Run CSV through merge script even for single TRC
             output_dir = os.path.dirname(csv_paths[0])
             final_csv = os.path.join(output_dir, "merged_decoded.csv")
 
@@ -884,7 +856,6 @@ def main(root):
                 row_limit=1_000_000,
             )
 
-            # Delete temporary CSV files
             for path in csv_paths:
                 try:
                     os.remove(path)
@@ -898,8 +869,6 @@ def main(root):
                 if os.name == "nt":
                     os.startfile(first_csv)
 
-        # Run decoding synchronously for single-file mode so the function
-        # doesn't return and destroy the Tk root before the worker completes.
         try:
             rows, columns, errors = parse_trc_file(trc_path, dbc)
             on_decode_done(rows, columns, errors)
@@ -993,8 +962,6 @@ def main(root):
         except OSError as e:
             print(f"⚠️ Could not delete temporary CSV {path}: {e}")
 
-    # merged_paths may be None (older merge_csv_files behavior), so
-    # fall back to the single final_csv path when needed.
     if isinstance(merged_paths, list) and merged_paths:
         first_csv = merged_paths[0]
         print(f"\n✅ Final merged CSV file(s) created. First file: {first_csv}")
@@ -1015,8 +982,6 @@ def show_choice_menu(root):
     choice_win.title("📊 Select Conversion Type")
     choice_win.geometry("400x220")
     choice_win.resizable(False, False)
-    
-    # Center the window
     choice_win.grab_set()
     
     choice_var = tk.IntVar()
@@ -1067,16 +1032,12 @@ if __name__ == "__main__":
     choice = show_choice_menu(root)
     
     if choice == 1:
-        # TRC to CSV
         main(root)
-        # After conversion finish, close the hidden root window instead of
-        # deiconifying it (which shows a small empty "tk" window).
         try:
             root.destroy()
         except Exception:
             pass
     elif choice == 2:
-        # LOG to CSV (BUSMASTER)
         from busmaster_to_csv import main as busmaster_main
         
         root.deiconify()
