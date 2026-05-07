@@ -5,20 +5,6 @@ from typing import Iterable, List
 
 OUTPUT_FILE = "merged.csv"
 
-# -------------------------------------------------------
-# merge_csv_files — chunked, low-RAM rewrite
-#
-# KEY CHANGES vs original:
-#  1. Never loads an entire CSV into RAM with pd.read_csv
-#  2. Reads each input file in chunks using csv.reader
-#  3. Writes output row-by-row — RAM use is O(chunk) not O(total)
-#  4. Units row detection unchanged (only inspects first row)
-#  5. Column union built from headers only (not full DataFrames)
-#  6. "Remove first 25 rows" behaviour preserved
-#  7. "Remove all-empty columns" done as a final scan pass
-# -------------------------------------------------------
-
-
 def _read_header(path: str):
     """Return (units_dict, data_columns, has_unit_row) without reading the whole file."""
     with open(path, newline='', encoding='utf-8', errors='ignore') as fh:
