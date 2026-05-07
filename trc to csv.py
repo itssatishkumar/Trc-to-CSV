@@ -555,6 +555,21 @@ def parse_trc_to_csv_streaming(trc_file: str, dbc, tmp_csv_path: str) -> list:
     total_lines = sum(1 for _ in open(trc_file, 'r', encoding='utf-8', errors='ignore'))
     print(f"   {total_lines:,} lines found")
 
+    # ---- Pre-scan: detect BMS_Firmware before columns are locked ----
+    print("🔎 Pre-scanning for firmware frame (0x7A1)...")
+    with open(trc_file, 'r', encoding='utf-8', errors='ignore') as f:
+        for line in f:
+            parsed = _parse_trc_line(line)
+            if parsed and parsed[2] == 0x7A1:
+                data_bytes = parsed[3]
+                if len(data_bytes) >= 4 and data_bytes[0] == 0x02:
+                    fw_str = f"{data_bytes[1]:02d}.{data_bytes[2]:02d}.{data_bytes[3]:02d}"
+                    last_known_values["BMS_Firmware"] = fw_str
+                    signal_names.add("BMS_Firmware")
+                    signal_to_can_id["BMS_Firmware"] = 0x7A1
+                    print(f"   ✅ Found firmware: {fw_str}")
+                break   # only need the first occurrence
+
     csv_fh = None
     writer = None
 
