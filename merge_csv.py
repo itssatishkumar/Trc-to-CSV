@@ -1,65 +1,45 @@
 import os
-import csv
 import math
 from typing import Iterable, List
+import pandas as pd
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+import csv
 
 OUTPUT_FILE = "merged.csv"
 
-def _read_header(path: str):
-    """Return (units_dict, data_columns, has_unit_row) without reading the whole file."""
-    with open(path, newline='', encoding='utf-8', errors='ignore') as fh:
-        reader = csv.reader(fh)
-        try:
-            header = next(reader)
-        except StopIteration:
-            return {}, [], False
+def _detect_and_strip_unit_row(df: pd.DataFrame):
+    """Detect unit row and remove it."""
 
-        try:
-            second = next(reader)
-        except StopIteration:
-            return {}, header, False
+    if df.empty:
+        return {}, df
 
-    # Detect unit row: Time (s) column should be numeric in a data row
-    time_idx = None
-    for i, col in enumerate(header):
-        if col in ("Time (s)", "Time"):
-            time_idx = i
-            break
-
+    first_row = df.iloc[0]
     is_unit_row = False
-    if time_idx is not None:
+
+    time_col = None
+    if "Time (s)" in df.columns:
+        time_col = "Time (s)"
+    elif "Time" in df.columns:
+        time_col = "Time"
+
+    if time_col is not None:
         try:
-            float(second[time_idx])
-        except (ValueError, IndexError):
+            float(str(first_row[time_col]))
+        except (TypeError, ValueError):
             is_unit_row = True
 
     units = {}
+
     if is_unit_row:
-        for col, val in zip(header, second):
-            v = val.strip()
-            if v:
-                units[col] = v
+        for col in df.columns:
+            val = first_row[col]
+            if pd.notna(val) and str(val).strip() != "":
+                units[col] = str(val)
 
-    return units, header, is_unit_row
+        df = df.iloc[1:].reset_index(drop=True)
 
-
-def _iter_data_rows(path: str, has_unit_row: bool, skip_first_n: int = 25):
-    """
-    Yield data rows (as lists) from a CSV, skipping header and optional unit row.
-    Also skips the first `skip_first_n` data rows (matches original behaviour).
-    """
-    with open(path, newline='', encoding='utf-8', errors='ignore') as fh:
-        reader = csv.reader(fh)
-        next(reader, None)              # skip header
-        if has_unit_row:
-            next(reader, None)          # skip unit row
-
-        skipped = 0
-        for row in reader:
-            if skipped < skip_first_n:
-                skipped += 1
-                continue
-            yield row
+    return units, df
 
 
 def merge_csv_files(
@@ -68,140 +48,134 @@ def merge_csv_files(
     open_after: bool = False,
     row_limit: int | None = None,
 ):
-    csv_list: List[str] = [f for f in csv_files if os.path.exists(f)]
+
+    csv_list: List[str] = list(csv_files)
 
     if not csv_list:
-        raise RuntimeError("No valid CSV files provided for merge")
+        raise RuntimeError("No CSV files provided for merge")
 
-    # ---- Pass 1: collect headers, units, column union ----
-    print("📋 Reading headers...")
-    file_meta = []   # list of (path, units_dict, columns, has_unit_row)
-    all_columns: List[str] = []
-    seen_cols: set = set()
-    all_units: dict = {}
+    dataframes: List[pd.DataFrame] = []
+    all_units = {}
 
     for path in csv_list:
-        units, columns, has_unit_row = _read_header(path)
-        file_meta.append((path, units, columns, has_unit_row))
-        all_units.update({k: v for k, v in units.items() if v})
-        for col in columns:
-            if col not in seen_cols:
-                seen_cols.add(col)
+
+        if not os.path.exists(path):
+            print(f"Warning: CSV file not found, skipping: {path}")
+            continue
+
+        df = pd.read_csv(path, dtype=str)
+
+        if df.empty:
+            continue
+
+        units, df_no_units = _detect_and_strip_unit_row(df)
+
+        # -----------------------------
+        # REMOVE FIRST 25 ROWS FROM EACH CSV
+        # -----------------------------
+        if len(df_no_units) > 25:
+            df_no_units = df_no_units.iloc[25:].reset_index(drop=True)
+        else:
+            df_no_units = df_no_units.iloc[0:0]
+
+        all_units.update({k: v for k, v in units.items() if v is not None})
+        dataframes.append(df_no_units)
+
+    if not dataframes:
+        raise RuntimeError("No non-empty CSV data to merge")
+
+    # -----------------------------
+    # Build column union
+    # -----------------------------
+
+    all_columns = []
+    seen = set()
+
+    for df in dataframes:
+        for col in df.columns:
+            if col not in seen:
+                seen.add(col)
                 all_columns.append(col)
 
-    if not all_columns:
-        raise RuntimeError("No columns found in any CSV file")
-
-    # Decide time column ordering
-    has_date = "DATE" in seen_cols
-    has_time_col = "TIME" in seen_cols
-    has_time_s = "Time (s)" in seen_cols
-    has_time = "Time" in seen_cols
-
-    if has_date and has_time_col:
-        # Remove Time (s) from output
+    # Remove Time(s) if DATE + TIME exist
+    if "DATE" in seen and "TIME" in seen:
         all_columns = [c for c in all_columns if c != "Time (s)"]
-    elif has_time_s:
+
+    elif "Time (s)" in seen:
         all_columns = ["Time (s)"] + [c for c in all_columns if c != "Time (s)"]
-    elif has_time:
+
+    elif "Time" in seen:
         all_columns = ["Time"] + [c for c in all_columns if c != "Time"]
 
-    num_cols = len(all_columns)
-    col_index = {c: i for i, c in enumerate(all_columns)}
-    EMPTY = ""
+    normalized = [df.reindex(columns=all_columns) for df in dataframes]
 
-    # ---- Pass 2: stream all rows into a single temp file ----
-    tmp_path = output_file + ".tmp_merge"
-    print("🔀 Streaming rows into merged file...")
-    total_rows_written = 0
+    merged_df = pd.concat(normalized, ignore_index=True)
 
-    # Track which columns have at least one non-empty value (for cleanup)
-    col_has_data = [False] * num_cols
-    # Always keep these
-    for always_keep in ("DATE", "TIME", "Time (s)", "Time"):
-        if always_keep in col_index:
-            col_has_data[col_index[always_keep]] = True
+    # -----------------------------
+    # Add unit row
+    # -----------------------------
 
-    with open(tmp_path, 'w', newline='', encoding='utf-8') as out_fh:
-        writer = csv.writer(out_fh)
-        writer.writerow(all_columns)    # header only — units injected later
+    if all_units:
+        unit_row = [all_units.get(col, "") for col in all_columns]
+        units_df = pd.DataFrame([unit_row], columns=all_columns)
+        final_df = pd.concat([units_df, merged_df], ignore_index=True)
 
-        for path, units, src_columns, has_unit_row in file_meta:
-            src_idx = [col_index.get(c) for c in src_columns]   # position in all_columns
+    else:
+        final_df = merged_df
 
-            for src_row in _iter_data_rows(path, has_unit_row, skip_first_n=25):
+    # -----------------------------
+    # Remove completely empty rows
+    # -----------------------------
 
-                # Skip completely empty rows
-                if not any(v.strip() for v in src_row):
-                    continue
+    tmp = final_df.replace(r"^\s*$", pd.NA, regex=True)
+    final_df = tmp.dropna(how="all").reset_index(drop=True)
 
-                out_row = [EMPTY] * num_cols
-                for s_i, dest_i in enumerate(src_idx):
-                    if dest_i is None:
-                        continue
-                    val = src_row[s_i] if s_i < len(src_row) else EMPTY
-                    out_row[dest_i] = val
-                    if val.strip():
-                        col_has_data[dest_i] = True
+    # -----------------------------
+    # Remove columns with no data
+    # -----------------------------
 
-                writer.writerow(out_row)
-                total_rows_written += 1
+    if len(final_df) > 1:
+        data_only = final_df.iloc[1:]
+        tmp_cols = data_only.replace(r"^\s*$", pd.NA, regex=True)
+        cols_to_keep = ~tmp_cols.isna().all(axis=0)
 
-    print(f"   {total_rows_written:,} data rows merged")
+        if "DATE" in final_df.columns:
+            cols_to_keep["DATE"] = True
 
-    # ---- Determine columns to keep ----
-    keep_indices = [i for i, has in enumerate(col_has_data) if has]
-    final_columns = [all_columns[i] for i in keep_indices]
+        if "TIME" in final_df.columns:
+            cols_to_keep["TIME"] = True
 
-    # ---- Pass 3: read temp, inject units row, write final output(s) ----
-    unit_row = [all_units.get(c, "") for c in final_columns]
+        if "Time (s)" in final_df.columns:
+            cols_to_keep["Time (s)"] = True
 
-    if row_limit and row_limit > 0:
-        # Split into multiple output files
+        final_df = final_df.loc[:, cols_to_keep]
+
+    # -----------------------------
+    # Split large files
+    # -----------------------------
+
+    if row_limit is not None and row_limit > 0:
+
+        total_rows = len(final_df)
+        total_parts = math.ceil(total_rows / row_limit)
         base, ext = os.path.splitext(output_file)
         output_paths: List[str] = []
-        part = 0
-        row_in_part = 0
-        out_fh = None
-        writer = None
 
-        def _open_next_part():
-            nonlocal out_fh, writer, part, row_in_part
-            if out_fh:
-                out_fh.close()
-            part += 1
-            suffix = "" if part == 1 else f"_part{part}"
+        print(
+            f"Writing merged data to CSV in {total_parts} part(s) "
+            f"(max {row_limit} rows per file)..."
+        )
+
+        for i in range(total_parts):
+
+            start = i * row_limit
+            end = (i + 1) * row_limit
+            chunk = final_df.iloc[start:end]
+            suffix = "" if i == 0 else f"_part{i+1}"
             path = f"{base}{suffix}{ext}"
+            chunk.to_csv(path, index=False)
             output_paths.append(path)
-            out_fh = open(path, 'w', newline='', encoding='utf-8')
-            writer = csv.writer(out_fh)
-            writer.writerow(final_columns)
-            if all_units:
-                writer.writerow(unit_row)
-                row_in_part = 1
-            else:
-                row_in_part = 0
-            print(f"📄 Writing part: {path}")
-
-        _open_next_part()
-
-        with open(tmp_path, newline='', encoding='utf-8') as tmp_fh:
-            reader = csv.reader(tmp_fh)
-            next(reader, None)   # skip header
-
-            for src_row in reader:
-                out_row = [src_row[i] if i < len(src_row) else EMPTY for i in keep_indices]
-                writer.writerow(out_row)
-                row_in_part += 1
-
-                if row_in_part >= row_limit:
-                    _open_next_part()
-
-        if out_fh:
-            out_fh.close()
-
-        os.remove(tmp_path)
-        print(f"✔ Merged {len(csv_list)} CSV file(s) → {len(output_paths)} output file(s)")
+            print(f"✔ Saved: {path} ({len(chunk)} rows)")
 
         if open_after and output_paths:
             try:
@@ -209,37 +183,120 @@ def merge_csv_files(
             except Exception as e:
                 print(f"Could not open file: {e}")
 
-        return output_paths
+        print(f"Merged {len(csv_list)} CSV files into {len(output_paths)} output file(s).")
+        xlsx_paths = [csv_to_xlsx(p) for p in output_paths]
+        return xlsx_paths
 
-    else:
-        # Single output file
-        with open(output_file, 'w', newline='', encoding='utf-8') as out_fh:
-            writer = csv.writer(out_fh)
-            writer.writerow(final_columns)
-            if all_units:
-                writer.writerow(unit_row)
+    # -----------------------------
+    # Write single CSV
+    # -----------------------------
 
-            with open(tmp_path, newline='', encoding='utf-8') as tmp_fh:
-                reader = csv.reader(tmp_fh)
-                next(reader, None)   # skip header
-                for src_row in reader:
-                    out_row = [src_row[i] if i < len(src_row) else EMPTY for i in keep_indices]
-                    writer.writerow(out_row)
+    final_df.to_csv(output_file, index=False)
+    xlsx_path = csv_to_xlsx(output_file)
+    print(f"Merged {len(csv_list)} CSV files into {output_file}")
 
-        os.remove(tmp_path)
-        print(f"✔ Merged {len(csv_list)} CSV file(s) → {output_file}")
+    if open_after:
+        try:
+            os.startfile(output_file)
+        except Exception as e:
+            print(f"Could not open file: {e}")
+    return [xlsx_path]
 
-        if open_after:
+def csv_to_xlsx(csv_path: str):
+    xlsx_path = os.path.splitext(csv_path)[0] + ".xlsx"
+
+    wb = Workbook()
+    ws = wb.active
+
+    with open(csv_path, newline='', encoding='utf-8') as fh:
+        reader = list(csv.reader(fh))
+
+    headers = reader[0]
+
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="00B050", end_color="00B050", fill_type="solid")
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    border = Border(
+        left=Side(style='thin', color="000000"),
+        right=Side(style='thin', color="000000"),
+        top=Side(style='thin', color="000000"),
+        bottom=Side(style='thin', color="000000"),
+    )
+
+    red_fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
+    white_bold = Font(color="FFFFFF", bold=True)
+
+    bms_idx = headers.index("BMS_State") if "BMS_State" in headers else None
+    veh_idx = headers.index("VehicleState") if "VehicleState" in headers else None
+
+    for r_idx, row in enumerate(reader, start=1):
+        for c_idx, val in enumerate(row, start=1):
+            val = val.strip()
+
             try:
-                os.startfile(output_file)
-            except Exception as e:
-                print(f"Could not open file: {e}")
+                num = float(val)
+                val = round(num, 2)
+            except:
+                pass
 
-        return [output_file]
+            cell = ws.cell(row=r_idx, column=c_idx, value=val)
 
+            if r_idx == 1:
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = center
+            else:
+                cell.alignment = center
 
-# ------------------ STANDALONE USE ------------------
+                if val == "1":
+                    cell.fill = red_fill
+                    cell.font = white_bold
+
+                if bms_idx is not None and c_idx - 1 == bms_idx:
+                    cell.font = white_bold
+
+                    if val == "Active":
+                        cell.fill = PatternFill(start_color="00B050", end_color="00B050", fill_type="solid")
+                    elif val == "Error":
+                        cell.fill = red_fill
+                    elif val == "Ready":
+                        cell.fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+                        cell.font = Font(bold=True, color="000000")
+                    elif val == "Precharge":
+                        cell.fill = PatternFill(start_color="FFC000", end_color="FFC000", fill_type="solid")
+                        cell.font = Font(bold=True, color="000000")
+                    elif val == "INIT":
+                        cell.fill = PatternFill(start_color="00B0F0", end_color="00B0F0", fill_type="solid")
+
+                if veh_idx is not None and c_idx - 1 == veh_idx:
+                    if val == "Drive":
+                        cell.fill = PatternFill(start_color="00B0F0", end_color="00B0F0", fill_type="solid")
+                        cell.font = white_bold
+                    elif val == "Off":
+                        cell.fill = red_fill
+                        cell.font = white_bold
+
+            cell.border = border
+
+    for r in range(1, ws.max_row + 1):
+        ws.row_dimensions[r].height = 20 if r == 1 else 14.4
+
+    ws.freeze_panes = "A2"
+
+    for col in ws.columns:
+        max_len = 0
+        col_letter = col[0].column_letter
+        for cell in col:
+            if cell.value:
+                max_len = max(max_len, len(str(cell.value)))
+        ws.column_dimensions[col_letter].width = min(max_len + 2, 50)
+
+    wb.save(xlsx_path)
+    return xlsx_path
+
 if __name__ == "__main__":
+
     import tkinter as tk
     from tkinter import filedialog
 
@@ -251,10 +308,9 @@ if __name__ == "__main__":
         title="Select CSV files to merge",
         filetypes=[("CSV files", "*.csv")]
     )
-    root.destroy()
 
+    root.destroy()
     csv_files = list(csv_files)
     if not csv_files:
         raise RuntimeError("No CSV files selected")
-
     merge_csv_files(csv_files, OUTPUT_FILE, open_after=True)
