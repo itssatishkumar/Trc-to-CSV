@@ -253,13 +253,14 @@ def csv_to_xlsx(csv_path: str):
                     cell.fill = red_fill
                     cell.font = white_bold
 
+                # BMS styling (ONLY exact matches)
                 if bms_idx is not None and c_idx - 1 == bms_idx:
-                    cell.font = white_bold
-
                     if val == "Active":
                         cell.fill = PatternFill(start_color="00B050", end_color="00B050", fill_type="solid")
+                        cell.font = white_bold
                     elif val == "Error":
                         cell.fill = red_fill
+                        cell.font = white_bold
                     elif val == "Ready":
                         cell.fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
                         cell.font = Font(bold=True, color="000000")
@@ -268,7 +269,9 @@ def csv_to_xlsx(csv_path: str):
                         cell.font = Font(bold=True, color="000000")
                     elif val == "INIT":
                         cell.fill = PatternFill(start_color="00B0F0", end_color="00B0F0", fill_type="solid")
+                        cell.font = white_bold
 
+                # Vehicle styling (ONLY exact matches)
                 if veh_idx is not None and c_idx - 1 == veh_idx:
                     if val == "Drive":
                         cell.fill = PatternFill(start_color="00B0F0", end_color="00B0F0", fill_type="solid")
