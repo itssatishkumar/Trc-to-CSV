@@ -85,7 +85,7 @@ def main():
     print(f"Local version: {local_version}")
     print(f"Remote version: {remote_version}")
 
-    # 1️⃣ Download all missing files first
+    # 1️⃣ Download missing files
     missing_files = [fname for fname in URLS if not os.path.exists(os.path.join(BASE_DIR, fname))]
     if missing_files:
         print("⬇️ Downloading missing file(s)...")
@@ -93,21 +93,21 @@ def main():
             download_file(URLS[fname], os.path.join(BASE_DIR, fname))
         print("✅ Missing files downloaded.")
 
-    # 2️⃣ If version changed → ask user to update all
+    # 2️⃣ Auto update (no user prompt)
     if remote_version != local_version:
-        if ask_user_update(local_version, remote_version):
-            print("⬇️ Updating all files to new version...")
-            for fname, url in URLS.items():
-                download_file(url, os.path.join(BASE_DIR, fname))
+        print("⬇️ New version detected. Updating automatically...")
 
-            # Update version file
-            with open(LOCAL_VERSION_FILE, "w") as f:
-                f.write(remote_version)
-            print("✅ Update complete.")
-        else:
-            print("⏩ Skipping update.")
+        for fname, url in URLS.items():
+            download_file(url, os.path.join(BASE_DIR, fname))
+
+        # Update version file
+        with open(LOCAL_VERSION_FILE, "w") as f:
+            f.write(remote_version)
+
+        print("✅ Update complete.")
 
     run_main()
+
 
 if __name__ == "__main__":
     main()
