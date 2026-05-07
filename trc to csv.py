@@ -13,10 +13,19 @@ def ensure_package(pkg_name, import_name=None):
     try:
         __import__(import_name)
     except ImportError:
+        import sys
+        import subprocess
         print(f"⚡ Installing {pkg_name}...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", pkg_name])
 
-for pkg, imp in [("pandas", None), ("cantools", None), ("tqdm", None), ("requests", None)]:
+
+for pkg, imp in [
+    ("pandas", None),
+    ("openpyxl", None),
+    ("cantools", None),
+    ("tqdm", None),
+    ("requests", None)
+]:
     ensure_package(pkg, imp)
 
 # ------------------ IMPORTS ------------------
