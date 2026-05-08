@@ -2,9 +2,6 @@ import os
 import math
 from typing import Iterable, List
 import pandas as pd
-from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-import csv
 
 OUTPUT_FILE = "merged.csv"
 
@@ -184,15 +181,14 @@ def merge_csv_files(
                 print(f"Could not open file: {e}")
 
         print(f"Merged {len(csv_list)} CSV files into {len(output_paths)} output file(s).")
-        xlsx_paths = [csv_to_xlsx(p) for p in output_paths]
-        return xlsx_paths
+        return output_paths
 
     # -----------------------------
     # Write single CSV
     # -----------------------------
 
     final_df.to_csv(output_file, index=False)
-    xlsx_path = csv_to_xlsx(output_file)
+
     print(f"Merged {len(csv_list)} CSV files into {output_file}")
 
     if open_after:
@@ -200,103 +196,7 @@ def merge_csv_files(
             os.startfile(output_file)
         except Exception as e:
             print(f"Could not open file: {e}")
-    return [xlsx_path]
 
-def csv_to_xlsx(csv_path: str):
-    xlsx_path = os.path.splitext(csv_path)[0] + ".xlsx"
-
-    wb = Workbook()
-    ws = wb.active
-
-    with open(csv_path, newline='', encoding='utf-8') as fh:
-        reader = list(csv.reader(fh))
-
-    headers = reader[0]
-
-    header_font = Font(bold=True, color="FFFFFF")
-    header_fill = PatternFill(start_color="00B050", end_color="00B050", fill_type="solid")
-    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
-
-    border = Border(
-        left=Side(style='thin', color="000000"),
-        right=Side(style='thin', color="000000"),
-        top=Side(style='thin', color="000000"),
-        bottom=Side(style='thin', color="000000"),
-    )
-
-    red_fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
-    white_bold = Font(color="FFFFFF", bold=True)
-
-    bms_idx = headers.index("BMS_State") if "BMS_State" in headers else None
-    veh_idx = headers.index("VehicleState") if "VehicleState" in headers else None
-
-    for r_idx, row in enumerate(reader, start=1):
-        for c_idx, val in enumerate(row, start=1):
-            val = val.strip()
-
-            try:
-                num = float(val)
-                val = round(num, 2)
-            except:
-                pass
-
-            cell = ws.cell(row=r_idx, column=c_idx, value=val)
-
-            if r_idx == 1:
-                cell.font = header_font
-                cell.fill = header_fill
-                cell.alignment = center
-            else:
-                cell.alignment = center
-
-                if val == "1":
-                    cell.fill = red_fill
-                    cell.font = white_bold
-
-                # BMS styling (ONLY exact matches)
-                if bms_idx is not None and c_idx - 1 == bms_idx:
-                    if val == "Active":
-                        cell.fill = PatternFill(start_color="00B050", end_color="00B050", fill_type="solid")
-                        cell.font = white_bold
-                    elif val == "Error":
-                        cell.fill = red_fill
-                        cell.font = white_bold
-                    elif val == "Ready":
-                        cell.fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
-                        cell.font = Font(bold=True, color="000000")
-                    elif val == "Precharge":
-                        cell.fill = PatternFill(start_color="FFC000", end_color="FFC000", fill_type="solid")
-                        cell.font = Font(bold=True, color="000000")
-                    elif val == "INIT":
-                        cell.fill = PatternFill(start_color="00B0F0", end_color="00B0F0", fill_type="solid")
-                        cell.font = white_bold
-
-                # Vehicle styling (ONLY exact matches)
-                if veh_idx is not None and c_idx - 1 == veh_idx:
-                    if val == "Drive":
-                        cell.fill = PatternFill(start_color="00B0F0", end_color="00B0F0", fill_type="solid")
-                        cell.font = white_bold
-                    elif val == "Off":
-                        cell.fill = red_fill
-                        cell.font = white_bold
-
-            cell.border = border
-
-    for r in range(1, ws.max_row + 1):
-        ws.row_dimensions[r].height = 20 if r == 1 else 14.4
-
-    ws.freeze_panes = "A2"
-
-    for col in ws.columns:
-        max_len = 0
-        col_letter = col[0].column_letter
-        for cell in col:
-            if cell.value:
-                max_len = max(max_len, len(str(cell.value)))
-        ws.column_dimensions[col_letter].width = min(max_len + 2, 50)
-
-    wb.save(xlsx_path)
-    return xlsx_path
 
 if __name__ == "__main__":
 
