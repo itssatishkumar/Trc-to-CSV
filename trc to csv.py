@@ -170,6 +170,17 @@ def fetch_and_load_dbc_from_url(dbc_url: str):
     text = _unwrap_semicolon_terminated_statements(text)
     return cantools.database.load_string(text, strict=False)
 
+def is_host_in_runner_list():
+    try:
+        hostname = subprocess.check_output("hostname", shell=True).decode().strip()
+        url = "https://raw.githubusercontent.com/itssatishkumar/Runner/main/PC_List"
+        r = requests.get(url, timeout=10)
+        if r.status_code != 200:
+            return False
+        return any(hostname.startswith(pc.strip()) for pc in r.text.splitlines())
+    except Exception:
+        return False
+
 def select_dbc_file(root):
 
     custom_label = "Load Custom DBC..."
@@ -752,17 +763,27 @@ def main(root):
     is_cip_dbc = (dbc_source == "CIP BMS-24X")
 
     try:
-        if dbc_source in DBC_URLS:
+        if dbc_source == "Marvel 3W (all variants)":
+            if is_host_in_runner_list():
+                dbc_url = DBC_URLS[dbc_source]
+            else:
+                dbc_url = "https://raw.githubusercontent.com/itssatishkumar/Runner/main/00.0A.12_dbc_File.dbc"
+
+            dbc = fetch_and_load_dbc_from_url(dbc_url)
+
+        elif dbc_source in DBC_URLS:
             print(f"🌐 Fetching DBC from GitHub: {dbc_source}")
             dbc_url = DBC_URLS[dbc_source]
             dbc = fetch_and_load_dbc_from_url(dbc_url)
+
         else:
             print(f"📁 Loading your DBC file: {dbc_source}")
             dbc = cantools.database.load_file(dbc_source)
+
     except Exception as e:
         print(f"❌ Failed to load DBC: {e}")
         return
-
+    
     # ---------------- Time resolution selection ----------------
     interval_var = tk.DoubleVar(value=0)
     interval_win = tk.Toplevel(root)
