@@ -548,6 +548,7 @@ def get_signal_order(dbc, signal_names):
 def parse_trc_file(trc_file, dbc):
     signal_names = set()
     signal_to_can_id = {}
+
     try:
         for msg in getattr(dbc, "messages", []) or []:
             frame_id = getattr(msg, "frame_id", None)
@@ -564,8 +565,8 @@ def parse_trc_file(trc_file, dbc):
         signal_to_can_id = {}
 
     decoded_rows = []
-    last_known_values = {}  # signal name -> last value
-    last_seen_time = {}  # can_id -> last timestamp (seconds)
+    last_known_values = {}
+    last_seen_time = {}
     error_frames = []
 
     with open(trc_file, 'r', encoding='utf-8', errors='ignore') as f:
@@ -578,10 +579,10 @@ def parse_trc_file(trc_file, dbc):
                 continue
 
             timestamp, frame_type, can_id, data_bytes = parsed
-            # ------------------ BMS FIRMWARE (0x7A1) ------------------
+
+            # ------------------ BMS FIRMWARE ------------------
             if can_id == 0x7A1 and len(data_bytes) >= 4:
                 if data_bytes[0] == 0x02:
-
                     major = data_bytes[1]
                     minor = data_bytes[2]
                     patch = data_bytes[3]
@@ -589,9 +590,9 @@ def parse_trc_file(trc_file, dbc):
                     last_known_values["BMS_Firmware"] = fw_str
                     signal_names.add("BMS_Firmware")
                     signal_to_can_id["BMS_Firmware"] = can_id
-
                     last_seen_time[can_id] = timestamp
 
+            # ------------------ ERROR FRAME ------------------
             if frame_type == "Error":
                 if len(data_bytes) < 4:
                     continue
@@ -600,19 +601,19 @@ def parse_trc_file(trc_file, dbc):
                 rx = data_bytes[2]
                 tx = data_bytes[3]
                 etype = {1:"Bit Error",2:"Form Error",4:"Stuff Error",8:"Other Error"}.get(can_id,"Unknown")
-                error_frames.append({"type":etype,"direction":direction,"bit_pos":bit_pos,"rx":rx,"tx":tx})
+                error_frames.append({
+                    "type": etype,
+                    "direction": direction,
+                    "bit_pos": bit_pos,
+                    "rx": rx,
+                    "tx": tx
+                })
 
-            # --------------------------------------------------
-            # SPECIAL HANDLING FOR 0x405 (TIME/DATE FRAME)
-            # --------------------------------------------------
+            # ------------------ TIME/DATE FRAME ------------------
             if can_id == SPECIAL_TIME_CAN_ID and len(data_bytes) >= 6:
-
                 hex_bytes = [f"{b:02X}" for b in data_bytes]
 
-                # TIME = Byte 0,1,2
                 time_str = f"{hex_bytes[0]}:{hex_bytes[1]}:{hex_bytes[2]}"
-
-                # DATE = Byte 3,4,5
                 date_str = f"{hex_bytes[3]}:{hex_bytes[4]}:{hex_bytes[5]}"
 
                 last_known_values["TIME"] = time_str
@@ -631,22 +632,54 @@ def parse_trc_file(trc_file, dbc):
                 if message:
                     decoded = message.decode(data_bytes)
                     last_seen_time[can_id] = timestamp
+
                     for sig, val in decoded.items():
+                        if isinstance(val, float):
+                            val = round(val, 3)
                         last_known_values[sig] = val
                         signal_names.add(sig)
                         signal_to_can_id.setdefault(sig, can_id)
 
+            # ------------------ ROW BUILD ------------------
             row = {"Time (s)": round(timestamp, 6)}
+
             for sig in signal_names:
                 sig_can_id = signal_to_can_id.get(sig)
                 seen_time = last_seen_time.get(sig_can_id)
-                if seen_time is not None and (timestamp - seen_time) <= 1.0 and sig in last_known_values:
-                    row[sig] = last_known_values[sig]
+
+                if (
+                    seen_time is not None
+                    and (timestamp - seen_time) <= 1.0
+                    and sig in last_known_values
+                ):
+                    val = last_known_values[sig]
+                    if isinstance(val, float):
+                        val = round(val, 3)
+                    row[sig] = val
                 else:
                     row[sig] = "NA"
+
             decoded_rows.append(row)
+
         except Exception:
             continue
+
+    ordered_signals = get_signal_order(dbc, signal_names)
+
+    if "BMS_Firmware" in ordered_signals:
+        ordered_signals.remove("BMS_Firmware")
+
+    if "DATE" in ordered_signals:
+        ordered_signals.remove("DATE")
+    if "TIME" in ordered_signals:
+        ordered_signals.remove("TIME")
+
+    ordered_signals = ["DATE", "TIME"] + ordered_signals
+
+    if "BMS_Firmware" in signal_names:
+        ordered_signals.append("BMS_Firmware")
+
+    return decoded_rows, ["Time (s)"] + ordered_signals, error_frames
 
     # ------------------ COLUMN ORDER FIX ------------------
     ordered_signals = get_signal_order(dbc, signal_names)
