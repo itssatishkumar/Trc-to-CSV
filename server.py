@@ -21,12 +21,10 @@ def heartbeat():
         clients[device] = {
             "name": name,
             "login_time": now,
-            "last_seen": now,
-            "history": []
+            "last_seen": now
         }
     else:
         clients[device]["last_seen"] = now
-        clients[device].pop("saved", None)
 
     return jsonify({"ok": True})
 
@@ -46,19 +44,11 @@ def get_clients():
             active_minutes = int((now - login_time).total_seconds() // 60)
             status_text = f"online since {login_time.strftime('%H:%M:%S')} ({active_minutes} min)"
         else:
-            if "saved" not in data:
-                data["history"].append({
-                    "login": login_time.strftime('%H:%M:%S'),
-                    "logout": last_seen.strftime('%H:%M:%S')
-                })
-                data["saved"] = True
-
             status_text = f"last active at {last_seen.strftime('%H:%M:%S')}"
 
         result[device] = {
             "name": data["name"],
-            "status": status_text,
-            "history": data["history"]
+            "status": status_text
         }
 
     return jsonify(result)
