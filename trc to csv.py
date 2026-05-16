@@ -77,6 +77,7 @@ def _parse_trc_line(line: str):
 import cantools
 from tqdm import tqdm
 import requests
+SERVER_URL = "https://trc-to-csv.onrender.com/heartbeat"
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 from merge_csv import merge_csv_files
@@ -1072,6 +1073,17 @@ def show_choice_menu(root):
 
 # ------------------ RUN ------------------
 if __name__ == "__main__":
+    try:
+        import socket
+        hostname = socket.gethostname()
+        requests.post(
+            "https://trc-to-csv.onrender.com/heartbeat",
+            json={"device": hostname, "name": hostname},
+            timeout=2
+        )
+    except:
+        pass
+
     for fname, url in URLS.items():
         path = os.path.join(BASE_DIR, fname)
         if not os.path.exists(path):
