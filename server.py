@@ -24,17 +24,6 @@ sheet = client.open_by_url(
     "https://docs.google.com/spreadsheets/d/1nDkL93epR1RQfFvCrzAVeiu5a9TpaU2484sOaVkQAQw/edit#gid=974404348"
 ).get_worksheet(5)
 
-# -------- Ensure header --------
-if not sheet.get_all_values():
-    sheet.append_row(["device", "name", "login_time", "last_seen"])
-    sheet.format("A1:D1", {
-        "backgroundColor": {"red": 0, "green": 0.6, "blue": 0},
-        "textFormat": {
-            "foregroundColor": {"red": 1, "green": 1, "blue": 1},
-            "bold": True
-        }
-    })
-
 # -------- Load existing data --------
 clients = {}
 
@@ -49,7 +38,7 @@ def load_clients():
                 "login_time": datetime.fromisoformat(row["login_time"]),
                 "last_seen": datetime.fromisoformat(row["last_seen"]),
             }
-    except Exception:
+    except:
         clients = {}
 
 load_clients()
@@ -98,7 +87,6 @@ def get_clients():
     now = datetime.now(ZoneInfo("Asia/Kolkata"))
     result = {}
 
-    # cleanup >30 days
     to_delete = []
     for device, data in clients.items():
         if (now - data["last_seen"]).total_seconds() > THIRTY_DAYS:
