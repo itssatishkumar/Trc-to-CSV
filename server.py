@@ -33,10 +33,11 @@ def load_clients():
     try:
         rows = sheet.get_all_records()
         for row in rows:
-            clients[row["device"]] = {
-                "name": row["name"],
-                "login_time": datetime.fromisoformat(row["login_time"]),
-                "last_seen": datetime.fromisoformat(row["last_seen"]),
+            device = row["DEVISE NAME"]
+            clients[device] = {
+                "name": row["USER INFO"],
+                "login_time": datetime.fromisoformat(row["LOGIN"]),
+                "last_seen": datetime.fromisoformat(row["LOGOUT"]),
             }
     except:
         clients = {}
@@ -46,7 +47,7 @@ load_clients()
 # -------- Save (update or append) --------
 def save_clients():
     rows = sheet.get_all_records()
-    row_map = {row["device"]: idx + 2 for idx, row in enumerate(rows)}
+    row_map = {row["DEVISE NAME"]: idx + 2 for idx, row in enumerate(rows)}
 
     for device, v in clients.items():
         row_data = [
