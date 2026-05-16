@@ -1075,12 +1075,16 @@ def show_choice_menu(root):
 if __name__ == "__main__":
     try:
         import socket
+        import getpass
+
         hostname = socket.gethostname()
+        username = getpass.getuser()
+
         requests.post(
             "https://trc-to-csv.onrender.com/heartbeat",
             json={
                 "device": hostname,
-                "name": hostname
+                "name": username
             },
             timeout=2
         )
