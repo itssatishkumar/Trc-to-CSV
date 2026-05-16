@@ -3,43 +3,63 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import os
 import json
+import gspread
+from google.oauth2.service_account import Credentials
 
 app = Flask(__name__)
 
-DATA_FILE = os.path.join(os.path.dirname(__file__), "clients.json")
-TIMEOUT = 60  # seconds
-THIRTY_DAYS = 30 * 24 * 60 * 60  # seconds
+TIMEOUT = 60
+THIRTY_DAYS = 30 * 24 * 60 * 60
+
+# -------- Google Sheets setup --------
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+
+creds = Credentials.from_service_account_info(
+    json.loads(os.environ["GOOGLE_CREDS"]),
+    scopes=SCOPES
+)
+
+client = gspread.authorize(creds)
+sheet = client.open_by_url("https://docs.google.com/spreadsheets/d/1nDkL93epR1RQfFvCrzAVeiu5a9TpaU2484sOaVkQAQw/edit#gid=974404348").get_worksheet(7)
 
 # -------- Load existing data --------
 clients = {}
 
-if os.path.exists(DATA_FILE):
+def load_clients():
+    global clients
+    clients = {}
     try:
-        with open(DATA_FILE, "r") as f:
-            raw = json.load(f)
-            clients = {
-                k: {
-                    "name": v["name"],
-                    "login_time": datetime.fromisoformat(v["login_time"]),
-                    "last_seen": datetime.fromisoformat(v["last_seen"]),
-                }
-                for k, v in raw.items()
+        rows = sheet.get_all_records()
+        for row in rows:
+            clients[row["device"]] = {
+                "name": row["name"],
+                "login_time": datetime.fromisoformat(row["login_time"]),
+                "last_seen": datetime.fromisoformat(row["last_seen"]),
             }
     except Exception:
         clients = {}
 
+load_clients()
 
+# -------- Save (update or append) --------
 def save_clients():
-    with open(DATA_FILE, "w") as f:
-        json.dump({
-            k: {
-                "name": v["name"],
-                "login_time": v["login_time"].isoformat(),
-                "last_seen": v["last_seen"].isoformat()
-            } for k, v in clients.items()
-        }, f, indent=2)
+    rows = sheet.get_all_records()
+    row_map = {row["device"]: idx + 2 for idx, row in enumerate(rows)}
 
+    for device, v in clients.items():
+        row_data = [
+            device,
+            v["name"],
+            v["login_time"].isoformat(),
+            v["last_seen"].isoformat()
+        ]
 
+        if device in row_map:
+            sheet.update(f"A{row_map[device]}:D{row_map[device]}", [row_data])
+        else:
+            sheet.append_row(row_data)
+
+# -------- Routes --------
 @app.route("/heartbeat", methods=["POST"])
 def heartbeat():
     data = request.json or {}
@@ -60,13 +80,12 @@ def heartbeat():
     save_clients()
     return jsonify({"ok": True})
 
-
 @app.route("/clients", methods=["GET"])
 def get_clients():
     now = datetime.now(ZoneInfo("Asia/Kolkata"))
     result = {}
 
-    # -------- cleanup older than 30 days --------
+    # cleanup >30 days
     to_delete = []
     for device, data in clients.items():
         if (now - data["last_seen"]).total_seconds() > THIRTY_DAYS:
@@ -78,7 +97,6 @@ def get_clients():
     if to_delete:
         save_clients()
 
-    # -------- build response --------
     for device, data in clients.items():
         last_seen = data["last_seen"]
         login_time = data["login_time"]
@@ -98,12 +116,9 @@ def get_clients():
 
     return jsonify(result)
 
-
 @app.route("/")
 def home():
     return "Server running"
 
-
 if __name__ == "__main__":
-    print("Using file:", DATA_FILE)
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
