@@ -6,24 +6,27 @@ import json
 
 app = Flask(__name__)
 
-DATA_FILE = "clients.json"
+DATA_FILE = os.path.join(os.path.dirname(__file__), "clients.json")
 TIMEOUT = 60  # seconds
 THIRTY_DAYS = 30 * 24 * 60 * 60  # seconds
 
 # -------- Load existing data --------
+clients = {}
+
 if os.path.exists(DATA_FILE):
-    with open(DATA_FILE, "r") as f:
-        raw = json.load(f)
-        clients = {
-            k: {
-                "name": v["name"],
-                "login_time": datetime.fromisoformat(v["login_time"]),
-                "last_seen": datetime.fromisoformat(v["last_seen"]),
+    try:
+        with open(DATA_FILE, "r") as f:
+            raw = json.load(f)
+            clients = {
+                k: {
+                    "name": v["name"],
+                    "login_time": datetime.fromisoformat(v["login_time"]),
+                    "last_seen": datetime.fromisoformat(v["last_seen"]),
+                }
+                for k, v in raw.items()
             }
-            for k, v in raw.items()
-        }
-else:
-    clients = {}
+    except Exception:
+        clients = {}
 
 
 def save_clients():
@@ -34,7 +37,7 @@ def save_clients():
                 "login_time": v["login_time"].isoformat(),
                 "last_seen": v["last_seen"].isoformat()
             } for k, v in clients.items()
-        }, f)
+        }, f, indent=2)
 
 
 @app.route("/heartbeat", methods=["POST"])
@@ -102,4 +105,5 @@ def home():
 
 
 if __name__ == "__main__":
+    print("Using file:", DATA_FILE)
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
