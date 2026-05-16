@@ -1078,10 +1078,13 @@ if __name__ == "__main__":
         hostname = socket.gethostname()
         requests.post(
             "https://trc-to-csv.onrender.com/heartbeat",
-            json={"device": hostname, "name": hostname},
+            json={
+                "device": hostname,
+                "name": hostname
+            },
             timeout=2
         )
-    except:
+    except Exception:
         pass
 
     for fname, url in URLS.items():
@@ -1094,21 +1097,25 @@ if __name__ == "__main__":
 
     root = tk.Tk()
     root.withdraw()
-    
+
     choice = show_choice_menu(root)
-    
+
     if choice == 1:
         main(root)
         try:
             root.destroy()
         except Exception:
             pass
+
     elif choice == 2:
         from busmaster_to_csv import main as busmaster_main
-        
         root.deiconify()
         busmaster_main(root)
         root.mainloop()
+
     else:
         print("❌ No option selected.")
-        root.destroy()
+        try:
+            root.destroy()
+        except Exception:
+            pass
