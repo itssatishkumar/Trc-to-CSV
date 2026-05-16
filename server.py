@@ -20,7 +20,20 @@ creds = Credentials.from_service_account_info(
 )
 
 client = gspread.authorize(creds)
-sheet = client.open_by_url("https://docs.google.com/spreadsheets/d/1nDkL93epR1RQfFvCrzAVeiu5a9TpaU2484sOaVkQAQw/edit#gid=974404348").get_worksheet(5)
+sheet = client.open_by_url(
+    "https://docs.google.com/spreadsheets/d/1nDkL93epR1RQfFvCrzAVeiu5a9TpaU2484sOaVkQAQw/edit#gid=974404348"
+).get_worksheet(5)
+
+# -------- Ensure header --------
+if not sheet.get_all_values():
+    sheet.append_row(["device", "name", "login_time", "last_seen"])
+    sheet.format("A1:D1", {
+        "backgroundColor": {"red": 0, "green": 0.6, "blue": 0},
+        "textFormat": {
+            "foregroundColor": {"red": 1, "green": 1, "blue": 1},
+            "bold": True
+        }
+    })
 
 # -------- Load existing data --------
 clients = {}
