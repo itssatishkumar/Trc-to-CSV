@@ -2,11 +2,39 @@ from flask import Flask, request, jsonify
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import os
+import json
 
 app = Flask(__name__)
 
-clients = {}
+DATA_FILE = "clients.json"
 TIMEOUT = 60  # seconds
+THIRTY_DAYS = 30 * 24 * 60 * 60  # seconds
+
+# -------- Load existing data --------
+if os.path.exists(DATA_FILE):
+    with open(DATA_FILE, "r") as f:
+        raw = json.load(f)
+        clients = {
+            k: {
+                "name": v["name"],
+                "login_time": datetime.fromisoformat(v["login_time"]),
+                "last_seen": datetime.fromisoformat(v["last_seen"]),
+            }
+            for k, v in raw.items()
+        }
+else:
+    clients = {}
+
+
+def save_clients():
+    with open(DATA_FILE, "w") as f:
+        json.dump({
+            k: {
+                "name": v["name"],
+                "login_time": v["login_time"].isoformat(),
+                "last_seen": v["last_seen"].isoformat()
+            } for k, v in clients.items()
+        }, f)
 
 
 @app.route("/heartbeat", methods=["POST"])
@@ -26,6 +54,7 @@ def heartbeat():
     else:
         clients[device]["last_seen"] = now
 
+    save_clients()
     return jsonify({"ok": True})
 
 
@@ -34,6 +63,19 @@ def get_clients():
     now = datetime.now(ZoneInfo("Asia/Kolkata"))
     result = {}
 
+    # -------- cleanup older than 30 days --------
+    to_delete = []
+    for device, data in clients.items():
+        if (now - data["last_seen"]).total_seconds() > THIRTY_DAYS:
+            to_delete.append(device)
+
+    for device in to_delete:
+        del clients[device]
+
+    if to_delete:
+        save_clients()
+
+    # -------- build response --------
     for device, data in clients.items():
         last_seen = data["last_seen"]
         login_time = data["login_time"]
