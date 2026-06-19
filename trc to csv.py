@@ -41,19 +41,6 @@ _TRC_LINE_RE_PCAN = re.compile(
     r'$',
 )
 
-_TRC_LINE_RE_LABELED = re.compile(
-    r'^\s*Timestamp:\s*'
-    r'([\d.]+)\s+'
-    r'ID:\s*'
-    r'([0-9A-Fa-f]{3,8})\s+'
-    r'(?:[A-Za-z]+\s+)?'
-    r'(Rx|Tx|Error)\s+'
-    r'DL:\s*'
-    r'(\d+)'
-    r'(?:\s+(.*?))?'
-    r'\s*,?\s*$',
-)
-
 
 def _parse_trc_line(line: str):
     match = _TRC_LINE_RE_OLD.search(line)
@@ -82,24 +69,6 @@ def _parse_trc_line(line: str):
         data_bytes = bytes(int(b, 16) for b in hex_tokens)
         if pcan_type in {"ER", "ERR", "ERROR"}:
             frame_type = "Error"
-
-        return timestamp_s, frame_type, can_id, data_bytes
-
-    match = _TRC_LINE_RE_LABELED.search(line)
-    if match:
-        timestamp_s = float(match.group(1))
-        can_id = int(match.group(2), 16)
-        frame_type = match.group(3)
-        try:
-            dlc = int(match.group(4))
-        except ValueError:
-            dlc = 0
-
-        remainder = match.group(5) or ""
-        hex_tokens = re.findall(r'\b[0-9A-Fa-f]{2}\b', remainder)
-        if dlc > 0:
-            hex_tokens = hex_tokens[:dlc]
-        data_bytes = bytes(int(b, 16) for b in hex_tokens)
 
         return timestamp_s, frame_type, can_id, data_bytes
 
@@ -811,11 +780,7 @@ def decode_trc_in_thread(root, merged_path, dbc, callback):
 def main(root):
     root.withdraw()
     print("📂 Please select one or more .trc files")
-    trc_files = list(filedialog.askopenfilenames(filetypes=[
-        ("TRC/Text files", "*.trc;*.txt"),
-        ("TRC files", "*.trc"),
-        ("Text files", "*.txt"),
-    ]))
+    trc_files = list(filedialog.askopenfilenames(filetypes=[("TRC files", "*.trc")]))
     if not trc_files:
         print("❌ No TRC files selected.")
         return
