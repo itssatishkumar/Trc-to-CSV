@@ -38,6 +38,7 @@ DBC_URLS = {
     "ION BMS": "https://raw.githubusercontent.com/itssatishkumar/CAN-SCRIPT-LOGGER/main/ION_BMS.dbc",
     "Marvel 3W (all variants)": "https://raw.githubusercontent.com/itssatishkumar/CAN-SCRIPT-LOGGER/main/Marvel_3W_all_variant.dbc",
     "Athena 4 / 5": "https://raw.githubusercontent.com/itssatishkumar/CAN-SCRIPT-LOGGER/main/Athena%204%265.dbc",
+    "Vecmocon": "https://raw.githubusercontent.com/itssatishkumar/CAN-SCRIPT-LOGGER/main/Vecmocon.dbc",
 }
 
 START_DT_RE = re.compile(
